@@ -2,8 +2,9 @@ import * as THREE from 'three/webgpu';
 import { texture, positionWorld, float, vec2, vec3, normalMap } from 'three/tsl';
 import type { RefractiveLightField } from './refractive-light.js';
 import type { FacilityShadows } from './facility-shadows.ts';
+import type { WetSurface } from '../water/wet-surface.ts';
 
-export async function makeTable(optics:RefractiveLightField,light:{color:THREE.Color;windowFraction:number;irradiance:number},facilities:FacilityShadows) {
+export async function makeTable(optics:RefractiveLightField,light:{color:THREE.Color;windowFraction:number;irradiance:number},facilities:FacilityShadows,wetness:WetSurface) {
   const loader=new THREE.TextureLoader();
   const urls=[new URL('../assets/wood_texture/wood_base.jpg',import.meta.url).href,
     new URL('../assets/wood_texture/wood_normal.png',import.meta.url).href,
@@ -32,6 +33,11 @@ export async function makeTable(optics:RefractiveLightField,light:{color:THREE.C
   const contactUV=positionWorld.xz.sub(optics.contactOriginNode).div(optics.shadowSpanNode);
   const contactInside=float(contactUV.x.greaterThan(0).and(contactUV.x.lessThan(1)).and(contactUV.y.greaterThan(0)).and(contactUV.y.lessThan(1)));
   const contact=texture(optics.shadowTexture,contactUV).g.mul(contactInside);
+  // Wet wood reads as gloss far more than as darkness: the roughness drop is
+  // the cue, the slight darkening only supports it.
+  const wetUV=positionWorld.xz.sub(wetness.originNode).div(wetness.spanNode).add(.5);
+  const wetInside=float(wetUV.x.greaterThan(0).and(wetUV.x.lessThan(1)).and(wetUV.y.greaterThan(0)).and(wetUV.y.lessThan(1)));
+  const wet=texture(wetness.texture,wetUV).r.mul(wetInside);
   const albedo=texture(base,uv).rgb.mul(vec3(.72,.39,.18)).mul(boardShade).mul(float(1).sub(seam.mul(.70)));
   const material=new THREE.MeshPhysicalNodeMaterial({metalness:0,roughness:.26,clearcoat:.38,clearcoatRoughness:.23});
   const facilityUV=facilities.worldToUVNode.mul(vec3(positionWorld.xz,1)).xy;
@@ -45,10 +51,11 @@ export async function makeTable(optics:RefractiveLightField,light:{color:THREE.C
   }
   const facilityShadow=facilityMask.x.mul(facilityInside),facilityContact=facilityMask.y.mul(facilityInside);
   const visibility=float(1).sub(shadow).mul(float(1).sub(facilityShadow));
-  material.colorNode=albedo.mul(float(1).sub(float(1).sub(visibility).mul(light.windowFraction))).mul(float(1).sub(contact.mul(.40))).mul(float(1).sub(facilityContact.mul(.35)));
+  material.colorNode=albedo.mul(float(1).sub(float(1).sub(visibility).mul(light.windowFraction))).mul(float(1).sub(contact.mul(.40))).mul(float(1).sub(facilityContact.mul(.35))).mul(float(1).sub(wet.mul(.11)));
   // Plane UV-v points toward -Z; the metre-scaled world UV points toward +Z.
   material.normalNode=normalMap(texture(normal,uv),vec2(.27,-.27));
-  material.roughnessNode=texture(roughness,uv).r.mul(.24).add(.12).add(seam.mul(.22));
+  const dryRoughness=texture(roughness,uv).r.mul(.24).add(.12).add(seam.mul(.22));
+  material.roughnessNode=dryRoughness.mul(float(1).sub(wet.mul(.72)));
   material.emissiveNode=albedo.mul(texture(optics.lightTexture,opticalUV).rgb).mul(light.irradiance/Math.PI).mul(vec3(light.color.r,light.color.g,light.color.b)).mul(inside).mul(float(1).sub(facilityShadow));
   const mesh=new THREE.Mesh(new THREE.PlaneGeometry(200,200),material);
   mesh.rotation.x=-Math.PI/2;mesh.position.y=-.00005;

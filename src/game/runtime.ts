@@ -14,6 +14,7 @@ import { OpticalTransport } from '../graphics/transport.ts';
 import { createComposite } from '../graphics/composite.ts';
 import { FixedStepper } from './fixed-step.ts';
 import { FacilityShadows } from '../graphics/facility-shadows.ts';
+import { WetSurface } from '../water/wet-surface.ts';
 import { quality, observeFrame } from '../graphics/quality.ts';
 
 export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
@@ -34,13 +35,14 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   const baby=new Baby(body);scene.add(baby.group);
   const optics=new RefractiveLightField(body.cage.opticalSurface,environment.incoming,ABSORPTION);
   const facilityShadows=new FacilityShadows(environment.incoming);
-  const table=await makeTable(optics,environment,facilityShadows);scene.add(table.mesh);
+  const wetness=new WetSurface();
+  const table=await makeTable(optics,environment,facilityShadows,wetness);scene.add(table.mesh);
   const composite=createComposite(renderer,scene,camera);
   const rig=new Locomotion(body);
-  rig.onContact=(speed,foot)=>sound.contact(speed,foot);
+  rig.onContact=(speed,foot)=>{sound.contact(speed,foot);wetness.impact(body.center,speed);};
   const physicsClock=new FixedStepper(PHYS.step);
   let lastTime=0,disposed=false;
-  const reset=()=>{sound.stopFacilities();input.clear();rig.reset();body.reset();input.recenter();baby.resetFace();physicsClock.reset();};
+  const reset=()=>{sound.stopFacilities();input.clear();rig.reset();body.reset();input.recenter();baby.resetFace();physicsClock.reset();wetness.clear();};
   const input=new Input(camera,renderer.domElement,body,baby.mesh,rig,sound,reset);
   if(import.meta.env.DEV)Object.defineProperty(window,'dropletDebug',{configurable:true,get:()=>({
     center:body.center.toArray(),sleeping:body.sleeping,grabs:body.grabs.length,volume:body.volumeRatio(),
@@ -80,6 +82,7 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   lastTime=performance.now();
   const renderedCamera=new THREE.Vector3(Infinity,Infinity,Infinity);
   const renderedRotation=new THREE.Quaternion();
+  const lastWet=new THREE.Vector2(body.center.x,body.center.z);
   let renderedSurface=-1,renderedFace=-1,renderedThickness=-1,renderedDpr=-1;
   let renderedSize='';
   const frame=(time:number)=>{
@@ -98,6 +101,11 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
       baby.update(dt);
       if(observeFrame(dt))resize();
       transport.rate=quality.opticalHz;
+      if(body.grounded&&Math.hypot(body.center.x-lastWet.x,body.center.z-lastWet.y)>.004) {
+        wetness.add({x:body.center.x,z:body.center.z,radius:.007,strength:.65,lifetime:4});
+        lastWet.set(body.center.x,body.center.z);
+      }
+      wetness.update(dt,body.center);
       input.update(dt);
       sound.listen(camera);
       transport.follow();
@@ -107,7 +115,7 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
       const faceVersion=baby.group.children.reduce((sum,child)=>sum+(((child as THREE.Mesh).geometry?.attributes.position as THREE.BufferAttribute|undefined)?.version??0),0);
       const thicknessVersion=body.surface.geometry.attributes.opticalThickness.version;
       const size=renderer.domElement.width+','+renderer.domElement.height;
-      if(!body.sleeping||renderedSurface!==body.surfaceRevision||renderedFace!==faceVersion||
+      if(!body.sleeping||wetness.drying||renderedSurface!==body.surfaceRevision||renderedFace!==faceVersion||
         renderedThickness!==thicknessVersion||renderedDpr!==renderer.getPixelRatio()||renderedSize!==size||
         renderedCamera.distanceToSquared(camera.position)>1e-12||renderedRotation.angleTo(camera.quaternion)>1e-6) {
         composite.render();renderedSurface=body.surfaceRevision;renderedFace=faceVersion;
@@ -120,7 +128,7 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   const dispose=()=>{
     if(disposed)return;disposed=true;
     void renderer.setAnimationLoop(null);input.dispose();sound.dispose();transport.dispose();resizeObserver.disconnect();cancelAnimationFrame(resizeFrame);
-    facilityShadows.dispose();composite.dispose();baby.dispose();table.dispose();environment.dispose();optics.dispose();renderer.dispose();
+    facilityShadows.dispose();composite.dispose();baby.dispose();table.dispose();wetness.dispose();environment.dispose();optics.dispose();renderer.dispose();
   };
   window.addEventListener('pagehide',event=>{if(!event.persisted)dispose();});
   if(import.meta.hot)import.meta.hot.dispose(dispose);
