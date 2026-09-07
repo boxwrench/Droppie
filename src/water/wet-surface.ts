@@ -92,7 +92,7 @@ export class WetSurface {
     ctx.globalCompositeOperation = 'lighten';
     for (const splat of this.splats) {
       const fade = 1 - splat.age / splat.lifetime;
-      const strength = splat.strength * fade * fade;
+      const strength = splat.strength * fade;
       if (strength <= .004) continue;
       const px = (splat.x - this.origin.x) * scale + WET_SIZE / 2;
       const py = (splat.z - this.origin.y) * scale + WET_SIZE / 2;

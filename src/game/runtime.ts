@@ -101,9 +101,20 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
       baby.update(dt);
       if(observeFrame(dt))resize();
       transport.rate=quality.opticalHz;
-      if(body.grounded&&Math.hypot(body.center.x-lastWet.x,body.center.z-lastWet.y)>.004) {
-        wetness.add({x:body.center.x,z:body.center.z,radius:.007,strength:.65,lifetime:4});
-        lastWet.set(body.center.x,body.center.z);
+      // Wetness comes from the part of him actually touching the wood, not from
+      // his centre of mass: as he squishes and slides the mark follows the
+      // trailing contact patch instead of looking like stamps dropped from above.
+      let sx=0,sz=0,weight=0;
+      for(let i=0;i<body.contact.length;i++) {
+        const c=body.contact[i];if(c<=0)continue;
+        const w=c*body.mass[i];sx+=body.x[i*3]*w;sz+=body.x[i*3+2]*w;weight+=w;
+      }
+      if(weight>0) {
+        const wx=sx/weight,wz=sz/weight;
+        if(Math.hypot(wx-lastWet.x,wz-lastWet.y)>.0025) {
+          wetness.add({x:wx,z:wz,radius:.024,strength:.8,lifetime:4});
+          lastWet.set(wx,wz);
+        }
       }
       wetness.update(dt,body.center);
       input.update(dt);

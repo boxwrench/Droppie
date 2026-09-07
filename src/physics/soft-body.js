@@ -30,6 +30,9 @@ export class SoftBody {
     this.sleeping=false;this.canSleep=true;this.quietTime=0;this.grounded=false;
     this.surfaceDirty=true;this.surfaceRevision=0;this.limitedSteps=0;this.lastMinJacobian=1;this.stepFraction=1;
     this.orientationSafety=null;this.guardedSteps=0;
+    // Shadows only the friction PHYS reads for the kernel, so every other
+    // constant stays live and no object is allocated per step.
+    this.grabSliding=false;this.stepPhys=Object.create(PHYS);
     const uniqueEdges=new Set();
     for(let t=0;t<cage.tets.length;t++) {
       const ids=cage.tets[t],offsets=ids.map(v=>v*3),[a,b,c,d]=offsets,p=this.rest;
@@ -214,10 +217,42 @@ export class SoftBody {
     const meta=this.kernel.meta;this.lastMinJacobian=meta[1];this.limitedSteps+=meta[2];this.guardedSteps+=meta[15];
   }
 
+  /**
+   * Stick until the grab has been dragged far enough sideways, then slip.
+   *
+   * The lever is the horizontal offset between the grab target and the part of
+   * him still stuck to the floor, which is the shear the contact actually sees.
+   * Comparing the target against grab.point instead measures nothing: the grab
+   * constraint pulls point onto target every step, so that residual stays near
+   * zero however hard you drag.
+   */
+  updateGrabSlip() {
+    if(!this.grabs.length||!this.grounded){this.grabSliding=false;return;}
+    let sx=0,sz=0,weight=0;
+    for(let i=0;i<this.contact.length;i++) {
+      const c=this.contact[i];if(c<=0)continue;
+      const w=c*this.mass[i];sx+=this.x[i*3]*w;sz+=this.x[i*3+2]*w;weight+=w;
+    }
+    if(weight<=0){this.grabSliding=false;return;}
+    const footX=sx/weight,footZ=sz/weight;
+    let stretch=0;
+    for(const grab of this.grabs) {
+      const d=Math.hypot(grab.target.x-footX,grab.target.z-footZ);
+      if(d>stretch)stretch=d;
+    }
+    if(!this.grabSliding&&stretch>PHYS.grabSlipDistance)this.grabSliding=true;
+    else if(this.grabSliding&&stretch<PHYS.grabSlipRelease)this.grabSliding=false;
+  }
+  get frictionScale(){return this.grabSliding?PHYS.grabSlipFrictionScale:1;}
+
   step(h) {
     if(!this.kernel)return this.stepJS(h);
     if(this.grab)this.wake();if(this.sleeping)return false;
-    this.kernel.step(h,PHYS);
+    this.updateGrabSlip();
+    const scale=this.frictionScale;
+    this.stepPhys.staticFriction=PHYS.staticFriction*scale;
+    this.stepPhys.dynamicFriction=PHYS.dynamicFriction*scale;
+    this.kernel.step(h,this.stepPhys);
     const meta=this.kernel.meta;this.grounded=meta[0]!==0;this.lastMinJacobian=meta[1];this.limitedSteps+=meta[2];this.stepFraction=meta[14];
     this.guardedSteps+=meta[15];
     this.center.set(meta[3],meta[4],meta[5]);
@@ -232,6 +267,7 @@ export class SoftBody {
   }
   stepJS(h) {
     if(this.grab)this.wake();if(this.sleeping)return false;
+    this.updateGrabSlip();
     this.stepFraction=1;
     const x=this.x,v=this.velocity,old=this.previous;
     old.set(x);this.contact.fill(0);
@@ -252,7 +288,8 @@ export class SoftBody {
     for(const c of this.contacts)if(c.normal>0) {
       this.grounded=true;let dx=0,dz=0;
       for(const [id,w] of c.weights){dx+=(x[id*3]-old[id*3])*w;dz+=(x[id*3+2]-old[id*3+2])*w;}
-      const tangent=Math.hypot(dx,dz),friction=tangent<PHYS.staticFriction*c.normal?1:Math.min(1,PHYS.dynamicFriction*c.normal/(tangent+1e-20));
+      const scale=this.frictionScale;
+      const tangent=Math.hypot(dx,dz),friction=tangent<PHYS.staticFriction*scale*c.normal?1:Math.min(1,PHYS.dynamicFriction*scale*c.normal/(tangent+1e-20));
       for(const [id,w] of c.weights){const s=this.inverseMass[id]*w*friction/c.denominator;x[id*3]-=dx*s;x[id*3+2]-=dz*s;}
     }
     this.preserveOrientation();

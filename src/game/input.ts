@@ -169,6 +169,7 @@ export class Input {
       this.grabs.delete(pointerId);
       const index=this.body.grabs.indexOf(state.grab);
       if(index!==-1)this.body.grabs.splice(index,1);
+      if(!this.body.grabs.length)this.body.grabSliding=false;// normal floor friction returns at once
       if(id!==undefined&&state.tap&&this.body.grabs.length===0&&!this.bodyControlled())this.rig.jump();
       if(this.canvas.hasPointerCapture(pointerId))this.canvas.releasePointerCapture(pointerId);
     }

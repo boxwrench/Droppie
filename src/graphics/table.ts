@@ -51,11 +51,18 @@ export async function makeTable(optics:RefractiveLightField,light:{color:THREE.C
   }
   const facilityShadow=facilityMask.x.mul(facilityInside),facilityContact=facilityMask.y.mul(facilityInside);
   const visibility=float(1).sub(shadow).mul(float(1).sub(facilityShadow));
-  material.colorNode=albedo.mul(float(1).sub(float(1).sub(visibility).mul(light.windowFraction))).mul(float(1).sub(contact.mul(.40))).mul(float(1).sub(facilityContact.mul(.35))).mul(float(1).sub(wet.mul(.11)));
+  material.colorNode=albedo.mul(float(1).sub(float(1).sub(visibility).mul(light.windowFraction))).mul(float(1).sub(contact.mul(.40))).mul(float(1).sub(facilityContact.mul(.35))).mul(float(1).sub(wet.mul(.08)));
   // Plane UV-v points toward -Z; the metre-scaled world UV points toward +Z.
   material.normalNode=normalMap(texture(normal,uv),vec2(.27,-.27));
   const dryRoughness=texture(roughness,uv).r.mul(.24).add(.12).add(seam.mul(.22));
-  material.roughnessNode=dryRoughness.mul(float(1).sub(wet.mul(.72)));
+  // The floor already carries a fixed clearcoat, and that layer owns the
+  // specular response, so wetness is driven almost entirely into the coat and
+  // the base roughness barely moves. Dry the coat sits at .38/.23; fully wet it
+  // reaches 1.0/.028, which is what actually reads as water.
+  material.roughnessNode=dryRoughness.mul(float(1).sub(wet.mul(.15)));
+  material.clearcoatNode=float(.38).add(wet.mul(.62)).min(1);
+  material.clearcoatRoughnessNode=float(.23).mul(float(1).sub(wet.mul(.88)));
+  material.clearcoatNormalNode=normalMap(texture(normal,uv),vec2(.27,-.27).mul(float(1).sub(wet)));
   material.emissiveNode=albedo.mul(texture(optics.lightTexture,opticalUV).rgb).mul(light.irradiance/Math.PI).mul(vec3(light.color.r,light.color.g,light.color.b)).mul(inside).mul(float(1).sub(facilityShadow));
   const mesh=new THREE.Mesh(new THREE.PlaneGeometry(200,200),material);
   mesh.rotation.x=-Math.PI/2;mesh.position.y=-.00005;
