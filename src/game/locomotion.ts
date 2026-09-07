@@ -1,5 +1,6 @@
 import { Vector3 } from 'three/webgpu';
 import type { SoftBody } from '../physics/soft-body.js';
+import { PHYS } from '../physics/constants.js';
 
 /** Soft recovery around the mass center, with no directional locomotion. */
 export class Locomotion {
@@ -39,7 +40,7 @@ export class Locomotion {
     if(b.grab) { this.releasedFor=0; this.jumpQueued=false; return; }
     this.releasedFor+=h;
     const recovery=Math.min(1,this.releasedFor/.65)*(this.grounded?1:.15);
-    const k=300*recovery,damping=15*recovery;
+    const k=PHYS.shapeMemory*recovery,damping=PHYS.shapeDamping*recovery;
     for(let i=0;i<b.mass.length;i++) {
       const j=i*3;
       // Relative targets preserve translation; airborne softness lets the tip lag.

@@ -29,7 +29,7 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   camera.position.set(.015,.115,.175);
   stage('Reading the light');
   const environment=await loadEnvironment(renderer,scene);
-  stage('Shaping your droplet');
+  stage('Shaping Droppie');
   const body=new SoftBody(await loadBabyCage());
   const baby=new Baby(body);scene.add(baby.group);
   const optics=new RefractiveLightField(body.cage.opticalSurface,environment.incoming,ABSORPTION);

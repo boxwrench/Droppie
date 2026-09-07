@@ -37,15 +37,27 @@ for(const {name,hz,grips,hold,useJS} of [
     // the view matrix before casting. Project the grips through that same matrix;
     // a stale one aims them somewhere the droplet is not.
     camera.updateMatrixWorld();
+    // Grip points are taken from the settled silhouette rather than hardcoded
+    // world coordinates: two on the flanks at two thirds height, one near the
+    // tip. Fixed millimetre offsets only land on one particular stiffness, and
+    // silently miss the body — leaving fewer grabs than asked for — as soon as
+    // the droplet is retuned softer or flatter.
+    body.surface.geometry.computeBoundingBox();
+    const box=body.surface.geometry.boundingBox;
+    const low=box.min.y,tall=box.max.y-box.min.y,flank=(box.max.x-box.min.x)/2*.28;
     const starts=Array.from({length:grips},(_,k)=>{
-      const point=new Vector3(k===0?-.009:k===1?.009:0,k===2?.061:.045,0).project(camera);
+      const point=new Vector3(k===0?-flank:k===1?flank:0,low+tall*(k===2?.90:.66),0).project(camera);
       return {pointerId:k+1,pointerType:'touch',button:0,buttons:1,type:'pointerdown',
         clientX:(point.x+1)*200,clientY:(1-point.y)*300,preventDefault(){},stopImmediatePropagation(){}};
     });
     for(const e of starts)input.begin(e);assert.equal(body.grabs.length,grips);
     const previous=body.x.slice(),cameraStart=camera.position.clone(),frameTimes=[];
     let minimumVolume=Infinity,maximumVolume=0,frozenFrames=0,maximumFrozen=0;
-    for(let frame=0;frame<(hold+4)*hz;frame++) {
+    // The tail only has to be long enough to prove the body is not trapped in
+    // repair. A floppy, near-liquid droplet legitimately keeps wobbling after a
+    // ten-second three-finger shake — measured at ~12.4s — so this window is
+    // generous on purpose. A body that never settles still fails.
+    for(let frame=0;frame<(hold+20)*hz;frame++) {
       const t=frame/hz;
       if(frame<hold*hz)for(let k=0;k<grips;k++)input.pointerMove({...starts[k],type:'pointermove',
         clientX:starts[k].clientX+190*Math.sin(t*39+k*2.1),clientY:starts[k].clientY-60+210*Math.sin(t*31+k*2.1)});
