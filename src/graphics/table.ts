@@ -1,8 +1,11 @@
 import * as THREE from 'three/webgpu';
-import { texture, positionWorld, float, vec2, vec3, normalMap } from 'three/tsl';
+import { texture, positionWorld, float, vec2, vec3, normalMap, reflector } from 'three/tsl';
 import type { RefractiveLightField } from './refractive-light.js';
 import type { FacilityShadows } from './facility-shadows.ts';
 import type { WetSurface } from '../water/wet-surface.ts';
+
+/** Deliberately strong while the mechanism is being proven. */
+const WET_REFLECTION=.30;
 
 export async function makeTable(optics:RefractiveLightField,light:{color:THREE.Color;windowFraction:number;irradiance:number},facilities:FacilityShadows,wetness:WetSurface) {
   const loader=new THREE.TextureLoader();
@@ -38,6 +41,13 @@ export async function makeTable(optics:RefractiveLightField,light:{color:THREE.C
   const wetUV=positionWorld.xz.sub(wetness.originNode).div(wetness.spanNode).add(.5);
   const wetInside=float(wetUV.x.greaterThan(0).and(wetUV.x.lessThan(1)).and(wetUV.y.greaterThan(0)).and(wetUV.y.lessThan(1)));
   const wet=texture(wetness.texture,wetUV).r.mul(wetInside);
+  // A low-resolution planar reflection of the room, added to the floor only
+  // where the mask says it is wet. Gloss alone cannot carry this scene: the HDR
+  // is an evenly lit interior, so a mirror in it returns nearly the luminance of
+  // the wood it replaces. Reflecting the actual scene puts Droppie and the
+  // window into the puddle, which is contrast the environment map never had.
+  const reflection=reflector({resolutionScale:.15,bounces:false});
+  reflection.target.rotateX(-Math.PI/2);
   const albedo=texture(base,uv).rgb.mul(vec3(.72,.39,.18)).mul(boardShade).mul(float(1).sub(seam.mul(.70)));
   const material=new THREE.MeshPhysicalNodeMaterial({metalness:0,roughness:.26,clearcoat:.38,clearcoatRoughness:.23});
   const facilityUV=facilities.worldToUVNode.mul(vec3(positionWorld.xz,1)).xy;
@@ -51,7 +61,7 @@ export async function makeTable(optics:RefractiveLightField,light:{color:THREE.C
   }
   const facilityShadow=facilityMask.x.mul(facilityInside),facilityContact=facilityMask.y.mul(facilityInside);
   const visibility=float(1).sub(shadow).mul(float(1).sub(facilityShadow));
-  material.colorNode=albedo.mul(float(1).sub(float(1).sub(visibility).mul(light.windowFraction))).mul(float(1).sub(contact.mul(.40))).mul(float(1).sub(facilityContact.mul(.35))).mul(float(1).sub(wet.mul(.08)));
+  material.colorNode=albedo.mul(float(1).sub(float(1).sub(visibility).mul(light.windowFraction))).mul(float(1).sub(contact.mul(.40))).mul(float(1).sub(facilityContact.mul(.35))).mul(float(1).sub(wet.mul(.18))).add(reflection.rgb.mul(wet.pow(.7)).mul(WET_REFLECTION));
   // Plane UV-v points toward -Z; the metre-scaled world UV points toward +Z.
   material.normalNode=normalMap(texture(normal,uv),vec2(.27,-.27));
   const dryRoughness=texture(roughness,uv).r.mul(.24).add(.12).add(seam.mul(.22));
@@ -61,10 +71,10 @@ export async function makeTable(optics:RefractiveLightField,light:{color:THREE.C
   // reaches 1.0/.028, which is what actually reads as water.
   material.roughnessNode=dryRoughness.mul(float(1).sub(wet.mul(.15)));
   material.clearcoatNode=float(.38).add(wet.mul(.62)).min(1);
-  material.clearcoatRoughnessNode=float(.23).mul(float(1).sub(wet.mul(.88)));
+  material.clearcoatRoughnessNode=float(.23).mul(float(1).sub(wet.mul(.97)));
   material.clearcoatNormalNode=normalMap(texture(normal,uv),vec2(.27,-.27).mul(float(1).sub(wet)));
   material.emissiveNode=albedo.mul(texture(optics.lightTexture,opticalUV).rgb).mul(light.irradiance/Math.PI).mul(vec3(light.color.r,light.color.g,light.color.b)).mul(inside).mul(float(1).sub(facilityShadow));
   const mesh=new THREE.Mesh(new THREE.PlaneGeometry(200,200),material);
   mesh.rotation.x=-Math.PI/2;mesh.position.y=-.00005;
-  return {mesh,dispose:()=>{mesh.geometry.dispose();material.dispose();[base,normal,roughness].forEach(t=>t.dispose());}};
+  return {mesh,reflectorTarget:reflection.target,dispose:()=>{mesh.geometry.dispose();material.dispose();[base,normal,roughness].forEach(t=>t.dispose());}};
 }
