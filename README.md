@@ -148,8 +148,11 @@ the feel of the mechanics.
 after a pointer, touch, or keyboard gesture. It primes the output for mobile
 browser policies, routes procedural oscillators and short noise buffers through
 a master gain and compressor, and fades the master to zero when muted. Landing
-sound is built from damped sine modes plus a filtered noise transient; there are
-no audio files or package dependencies. Facility audio uses the same context.
+sound is built from damped sine modes plus a filtered noise transient. The
+background music is the looped `Button_Nose_Parade.mp3` asset at a quiet `.15`
+music gain; if it cannot be fetched or decoded, the small synthesized melody
+remains as a fallback. Facility audio uses the same context, and no audio
+package dependency is required.
 
 This is deliberately event-driven. Contact calls create a short sound at the
 impact strength; the fixed physics loop does not emit a sound every frame.

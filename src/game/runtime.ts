@@ -51,10 +51,11 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
       puddle.aspect.value=1.03+Math.min(1,horizontal/.4)*.12;
     }
     if(impact&&speed>.35)splash.burst(body.center,Math.min(speed,.9)*.55,7+Math.round(Math.min(1,(speed-.35)/.45)*3),rig.velocity);
+    if(impact&&speed>.35)sound.splash(Math.min(1,(speed-.35)/.45));
   };
   const physicsClock=new FixedStepper(PHYS.step);
   let lastTime=0,disposed=false;
-  const reset=()=>{sound.stopFacilities();input.clear();rig.reset();body.reset();input.recenter();baby.resetFace();physicsClock.reset();splash.clear();puddle.hide();};
+  const reset=()=>{sound.stopFacilities();sound.reset();input.clear();rig.reset();body.reset();input.recenter();baby.resetFace();physicsClock.reset();splash.clear();puddle.hide();};
   const input=new Input(camera,renderer.domElement,body,baby.mesh,rig,sound,reset);
   if(import.meta.env.DEV)Object.defineProperty(window,'dropletDebug',{configurable:true,get:()=>({
     center:body.center.toArray(),sleeping:body.sleeping,grabs:body.grabs.length,volume:body.volumeRatio(),
@@ -64,6 +65,8 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
     puddleState:{visible:puddle.visible,radius:puddle.radius.value,strength:puddle.strength.value},
     hidePuddle:()=>puddle.hide(),
     splash:(count?:number,speed?:number)=>splash.burst(body.center,speed??.55,count??24,rig.velocity),
+    soundHop:()=>sound.hop(),soundSplash:()=>sound.splash(.8),
+    musicOn:()=>sound.musicOn(),musicOff:()=>sound.musicOff(),
   })});
   const transport=new OpticalTransport(optics,body,camera,environment.incoming,fail);
   const resize=()=>resizeView(renderer,camera,input.controls);

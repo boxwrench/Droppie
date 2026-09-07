@@ -73,7 +73,7 @@ export class Input {
         e.preventDefault();void sound.unlock().catch(()=>{});button.setPointerCapture(e.pointerId);
         const code=button.dataset.control!;
         this.touchKeys.set(e.pointerId,code);button.classList.add('held');
-        if(code==='Space'&&!this.bodyControlled())rig.jump();
+        if(code==='Space'&&!this.bodyControlled()) {this.sound.hop();rig.jump();}
       },{signal});
       const release=(e:PointerEvent)=>{
         this.touchKeys.delete(e.pointerId);button.classList.remove('held');
@@ -96,7 +96,9 @@ export class Input {
     if(Math.hypot(sample.clientX-state.downX,sample.clientY-state.downY)>8)state.moved=true;
     this.eventRay(sample);
     if(projectGrabTarget(this.raycaster.ray,state.plane,this.temp)) {
-      state.rawTarget.copy(this.temp);state.commandVersion++;return true;
+      state.rawTarget.copy(this.temp);state.commandVersion++;
+      this.sound.stretch(Math.min(1,state.rawTarget.distanceTo(state.grab.point)/.08));
+      return true;
     }
     return false;
   }
@@ -119,6 +121,7 @@ export class Input {
     e.preventDefault();e.stopImmediatePropagation();
     const grab=surfaceGrab(this.body,face,point);if(!grab)return;
     this.body.grabs.push(grab);this.body.wake();
+    void this.sound.unlock().then(()=>this.sound.grab()).catch(()=>{});
     this.camera.getWorldDirection(this.temp);
     this.grabs.set(e.pointerId,{
       grab,pointerType:e.pointerType,
@@ -153,6 +156,8 @@ export class Input {
     // Mark released before releasing capture, which may itself dispatch an event.
     state.releasePending=true;
     state.tap=e.type==='pointerup'&&!state.moved&&performance.now()-state.downTime<280&&this.grabs.size===1;
+    if(e.type==='pointerup')this.sound.release(Math.min(1,state.rawTarget.distanceTo(state.grab.point)/.08));
+    this.sound.stopStretch();
     state.releaseStepsRemaining=state.physicsSteps===0?2:1;
     if(this.canvas.hasPointerCapture(e.pointerId))this.canvas.releasePointerCapture(e.pointerId);
     this.syncGrabControls();
@@ -170,7 +175,9 @@ export class Input {
       const index=this.body.grabs.indexOf(state.grab);
       if(index!==-1)this.body.grabs.splice(index,1);
       if(!this.body.grabs.length)this.body.grabSliding=false;// normal floor friction returns at once
-      if(id!==undefined&&state.tap&&this.body.grabs.length===0&&!this.bodyControlled())this.rig.jump();
+      if(id!==undefined&&state.tap&&this.body.grabs.length===0&&!this.bodyControlled()) {
+        this.sound.hop();this.rig.jump();
+      }
       if(this.canvas.hasPointerCapture(pointerId))this.canvas.releasePointerCapture(pointerId);
     }
     if(id===undefined)this.body.grab=null;
@@ -180,12 +187,13 @@ export class Input {
     if((e.target as HTMLElement)?.closest('input,textarea,select,[contenteditable="true"]'))return;
     if(e.code==='Space'&&(e.target as HTMLElement)?.closest('button'))return;
     if(e.code==='Space') {e.preventDefault();void this.sound.unlock().catch(()=>{});}
-    if(e.code==='Space'&&!e.repeat&&!this.bodyControlled())this.rig.jump();
+    if(e.code==='Space'&&!e.repeat&&!this.bodyControlled()) {this.sound.hop();this.rig.jump();}
     if(e.code==='KeyR'&&!e.repeat)this.reset();
     if(e.code==='Escape')this.finishRelease();
   };
   clear=()=>{
     this.touchKeys.clear();
+    this.sound.stopStretch();
     this.finishRelease();this.rig.move.set(0,0,0);
     document.querySelectorAll('.held').forEach(el=>el.classList.remove('held'));
   };
