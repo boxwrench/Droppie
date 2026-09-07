@@ -272,6 +272,12 @@ reference for the solver, WebAssembly kernel, optical worker, caustic pipeline,
 HDR environment, and wood assets. Droppie replaces the generated humanoid with
 a droplet and leaves the upstream facility modules available as reference.
 
+Original Droppie contributions are released under the [MIT License](LICENSE).
+When redistributing them, retain the copyright and permission notice. The
+Jelly-Baby-derived portions and upstream assets remain subject to their own
+terms. `Button_Nose_Parade.mp3` is a project-supplied music asset and should be
+redistributed only with the creator's permission and attribution.
+
 ## Further reading
 
 * [XPBD: Position-Based Simulation of Compliant Constrained Dynamics](https://matthias-research.github.io/pages/publications/XPBD.pdf)
