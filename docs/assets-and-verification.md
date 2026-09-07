@@ -9,7 +9,7 @@ source and the verification suite exercises the same modules used by the game.
 | Location | Role | Ownership |
 | --- | --- | --- |
 | `src/assets/bg_room.exr` | Source HDR room/window image for environment lighting and measured transport. | Authored runtime asset. |
-| `src/assets/wood_texture/wood_base.jpg` | Table albedo. | Authored runtime asset. |
+| `src/assets/wood_texture/wood_base.jpg` | Table albedo, 2048x2048 to match the normal and roughness maps. | Authored runtime asset. |
 | `src/assets/wood_texture/wood_normal.png` | Table normal map. | Authored runtime asset. |
 | `src/assets/wood_texture/wood_roughness.jpg` | Table roughness map. | Authored runtime asset. |
 | `src/assets/model/jelly-baby.bin` | Packed generated model, cage, contact, optical, and mapping arrays. | Generated; consumed by runtime. |

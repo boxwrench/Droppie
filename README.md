@@ -11,7 +11,7 @@ on a phone or a desktop browser, but it needs WebGPU: iOS 18+ Safari, Chrome or 
 121+, and Android Chrome on a recent device. Firefox and older iOS show the
 "needs a WebGPU-capable browser" notice instead.
 
-The first visit pulls about 24 MB of textures and an HDR environment, so give it a
+The first visit pulls about 12 MB of textures and an HDR environment, so give it a
 moment on a cold connection; afterwards the browser cache makes it near-instant.
 
 `.github/workflows/pages.yml` rebuilds and redeploys the site on every push to `main`.
