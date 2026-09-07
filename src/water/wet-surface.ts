@@ -21,8 +21,7 @@ export type WetSplat = {
  *
  * Splats are held in world coordinates and redrawn each update, so the window
  * can follow him without the marks sliding along with it. The floor shows this
- * mostly by losing roughness — wet wood is glossy far more than it is dark —
- * with only a slight darkening underneath.
+ * as darker wood with a smooth coat and a simple rounded boundary.
  */
 export class WetSurface {
   readonly span = WET_SPAN;
@@ -63,7 +62,7 @@ export class WetSurface {
   impact(center: THREE.Vector3, speed: number) {
     this.add({
       x: center.x, z: center.z,
-      radius: .015 + Math.min(speed, .6) * .025,
+      radius: .010 + Math.min(speed, .6) * .016,
       strength: .8, lifetime: 5,
     });
   }
@@ -76,10 +75,11 @@ export class WetSurface {
       splat.age += dt;
       if (splat.age >= splat.lifetime) this.splats.splice(i, 1);
     }
-    this.origin.set(center.x, center.z);
     this.since += dt;
     if (this.since < 1 / WET_HZ) return;
     this.since = 0;
+    // Move the sampling origin only when its world-space mask is redrawn.
+    this.origin.set(center.x, center.z);
     this.redraw();
   }
 
@@ -91,7 +91,8 @@ export class WetSurface {
     // Overlapping marks take the strongest value rather than summing to white.
     ctx.globalCompositeOperation = 'lighten';
     for (const splat of this.splats) {
-      const fade = 1 - splat.age / splat.lifetime;
+      const remaining = Math.min(1, (1 - splat.age / splat.lifetime) / .65);
+      const fade = remaining * remaining * (3 - 2 * remaining);
       const strength = splat.strength * fade;
       if (strength <= .004) continue;
       const px = (splat.x - this.origin.x) * scale + WET_SIZE / 2;
@@ -101,7 +102,7 @@ export class WetSurface {
       const grad = ctx.createRadialGradient(px, py, 0, px, py, pr);
       const level = Math.round(strength * 255);
       grad.addColorStop(0, `rgb(${level},${level},${level})`);
-      grad.addColorStop(.55, `rgba(${level},${level},${level},.72)`);
+      grad.addColorStop(.82, `rgb(${level},${level},${level})`);
       grad.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = grad;
       ctx.beginPath();

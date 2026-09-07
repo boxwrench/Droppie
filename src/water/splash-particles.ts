@@ -1,6 +1,5 @@
 import * as THREE from 'three/webgpu';
 import { PHYS } from '../physics/constants.js';
-import type { WetSurface } from './wet-surface.ts';
 
 const MAX_DROPS = 32;
 
@@ -15,8 +14,7 @@ type SplashDrop = {
  * Droplets thrown off by a hard landing, and later by a burst.
  *
  * One InstancedMesh and simple ballistics: no collision beyond the floor, no
- * soft bodies, no allocation per frame. A drop that reaches the table wets it
- * and is retired, so the splash feeds the same mask the trail writes to.
+ * soft bodies, no allocation per frame. Drops retire on contact with the floor; the landing circle carries the effect.
  */
 export class SplashParticles {
   readonly mesh: THREE.InstancedMesh;
@@ -24,10 +22,8 @@ export class SplashParticles {
   private readonly matrix = new THREE.Matrix4();
   private readonly scale = new THREE.Vector3();
   private readonly hidden = new THREE.Vector3(0, 0, 0);
-  private readonly wetness: WetSurface;
 
-  constructor(wetness: WetSurface) {
-    this.wetness = wetness;
+  constructor() {
     const geometry = new THREE.SphereGeometry(1, 8, 6);
     const material = new THREE.MeshPhysicalMaterial({
       color: '#61ccff', roughness: .04, metalness: 0,
@@ -74,11 +70,6 @@ export class SplashParticles {
       drop.velocity.y -= PHYS.gravity * dt;
       drop.position.addScaledVector(drop.velocity, dt);
       if (drop.position.y <= PHYS.floor + drop.radius) {
-        // Landing a drop is the point of it: each one marks the wood.
-        this.wetness.add({
-          x: drop.position.x, z: drop.position.z,
-          radius: .006 + drop.radius * 4, strength: .7, lifetime: 3.5,
-        });
         drop.active = false;
       }
     }

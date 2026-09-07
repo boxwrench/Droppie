@@ -1,13 +1,10 @@
 import * as THREE from 'three/webgpu';
-import { texture, positionWorld, float, vec2, vec3, normalMap, reflector } from 'three/tsl';
+import { texture, positionWorld, float, vec2, vec3, normalMap, mix, atan } from 'three/tsl';
 import type { RefractiveLightField } from './refractive-light.js';
+import type { Puddle } from '../water/puddle.ts';
 import type { FacilityShadows } from './facility-shadows.ts';
-import type { WetSurface } from '../water/wet-surface.ts';
 
-/** Deliberately strong while the mechanism is being proven. */
-const WET_REFLECTION=.30;
-
-export async function makeTable(optics:RefractiveLightField,light:{color:THREE.Color;windowFraction:number;irradiance:number},facilities:FacilityShadows,wetness:WetSurface) {
+export async function makeTable(optics:RefractiveLightField,light:{color:THREE.Color;windowFraction:number;irradiance:number},facilities:FacilityShadows,puddle:Puddle) {
   const loader=new THREE.TextureLoader();
   const urls=[new URL('../assets/wood_texture/wood_base.jpg',import.meta.url).href,
     new URL('../assets/wood_texture/wood_normal.png',import.meta.url).href,
@@ -36,18 +33,33 @@ export async function makeTable(optics:RefractiveLightField,light:{color:THREE.C
   const contactUV=positionWorld.xz.sub(optics.contactOriginNode).div(optics.shadowSpanNode);
   const contactInside=float(contactUV.x.greaterThan(0).and(contactUV.x.lessThan(1)).and(contactUV.y.greaterThan(0)).and(contactUV.y.lessThan(1)));
   const contact=texture(optics.shadowTexture,contactUV).g.mul(contactInside);
-  // Wet wood reads as gloss far more than as darkness: the roughness drop is
-  // the cue, the slight darkening only supports it.
-  const wetUV=positionWorld.xz.sub(wetness.originNode).div(wetness.spanNode).add(.5);
-  const wetInside=float(wetUV.x.greaterThan(0).and(wetUV.x.lessThan(1)).and(wetUV.y.greaterThan(0)).and(wetUV.y.lessThan(1)));
-  const wet=texture(wetness.texture,wetUV).r.mul(wetInside);
-  // A low-resolution planar reflection of the room, added to the floor only
-  // where the mask says it is wet. Gloss alone cannot carry this scene: the HDR
-  // is an evenly lit interior, so a mirror in it returns nearly the luminance of
-  // the wood it replaces. Reflecting the actual scene puts Droppie and the
-  // window into the puddle, which is contrast the environment map never had.
-  const reflection=reflector({resolutionScale:.15,bounces:false});
-  reflection.target.rotateX(-Math.PI/2);
+  // Stable, slightly asymmetric footprint, aligned with the impact's horizontal motion.
+  const offset=positionWorld.xz.sub(puddle.center);
+  const local=vec2(offset.dot(puddle.direction),offset.dot(vec2(puddle.direction.y.negate(),puddle.direction.x)));
+  const footprint=local.div(vec2(puddle.aspect,float(1).div(puddle.aspect)));
+  const angle=atan(footprint.y,footprint.x.add(.0000001));
+  const outline=float(1).add(angle.mul(3).add(.8).sin().mul(.06))
+    .add(angle.mul(7).add(2.1).sin().mul(.035)).add(angle.mul(11).add(4.3).sin().mul(.02));
+  const distance=footprint.length().div(outline);
+  // A glossy core transitions through a broad damp fringe back to untouched wood.
+  const visibleRadius=puddle.radius.mul(1.25);
+  const coreMask=float(1).sub(distance.smoothstep(visibleRadius.mul(.86),visibleRadius));
+  const wet=coreMask.mul(puddle.strength);
+  const halo=float(1).sub(distance.smoothstep(visibleRadius.mul(.82),visibleRadius.mul(1.22)))
+    .mul(float(1).sub(coreMask)).mul(puddle.strength);
+  // Broad sinusoidal wave packets perturb highlights, never draw luminous rings.
+  let ripple=float(0).add(0);
+  for(const [delay,duration,amplitude,ellipse] of [[0,.35,1,.94],[.08,.36,.55,1.07],[.14,.41,.25,.98]]) {
+    const progress=puddle.age.sub(delay).div(duration).clamp(0,1);
+    const envelope=progress.mul(Math.PI).sin().max(0);
+    const waveDistance=footprint.mul(vec2(ellipse,1/ellipse)).length().div(puddle.radius);
+    const phase=waveDistance.sub(progress.mul(1.2)).mul(9);
+    const packet=float(1).sub(phase.abs().div(Math.PI).clamp(0,1));
+    ripple=ripple.add(phase.sin().mul(packet.mul(packet)).mul(envelope).mul(amplitude));
+  }
+  const waveX=local.x.mul(190).add(puddle.age.mul(3.1)).sin().mul(.0025);
+  const waveZ=local.y.mul(260).sub(puddle.age.mul(2.3)).sin().mul(.002);
+  const surfaceWave=vec2(waveX,waveZ).add(footprint.div(footprint.length().max(.001)).mul(ripple.mul(.003))).mul(wet);
   const albedo=texture(base,uv).rgb.mul(vec3(.72,.39,.18)).mul(boardShade).mul(float(1).sub(seam.mul(.70)));
   const material=new THREE.MeshPhysicalNodeMaterial({metalness:0,roughness:.26,clearcoat:.38,clearcoatRoughness:.23});
   const facilityUV=facilities.worldToUVNode.mul(vec3(positionWorld.xz,1)).xy;
@@ -61,20 +73,21 @@ export async function makeTable(optics:RefractiveLightField,light:{color:THREE.C
   }
   const facilityShadow=facilityMask.x.mul(facilityInside),facilityContact=facilityMask.y.mul(facilityInside);
   const visibility=float(1).sub(shadow).mul(float(1).sub(facilityShadow));
-  material.colorNode=albedo.mul(float(1).sub(float(1).sub(visibility).mul(light.windowFraction))).mul(float(1).sub(contact.mul(.40))).mul(float(1).sub(facilityContact.mul(.35))).mul(float(1).sub(wet.mul(.18))).add(reflection.rgb.mul(wet.pow(.7)).mul(WET_REFLECTION));
+  const wetAlbedo=albedo.mul(float(1).sub(wet.mul(.20)).sub(halo.mul(.09)));
+  material.colorNode=wetAlbedo.mul(float(1).sub(float(1).sub(visibility).mul(light.windowFraction))).mul(float(1).sub(contact.mul(.40))).mul(float(1).sub(facilityContact.mul(.35)));
   // Plane UV-v points toward -Z; the metre-scaled world UV points toward +Z.
-  material.normalNode=normalMap(texture(normal,uv),vec2(.27,-.27));
+  material.normalNode=normalMap(texture(normal,uv),vec2(.27,-.27).mul(float(1).sub(wet.mul(.85))));
   const dryRoughness=texture(roughness,uv).r.mul(.24).add(.12).add(seam.mul(.22));
-  // The floor already carries a fixed clearcoat, and that layer owns the
-  // specular response, so wetness is driven almost entirely into the coat and
-  // the base roughness barely moves. Dry the coat sits at .38/.23; fully wet it
-  // reaches 1.0/.028, which is what actually reads as water.
-  material.roughnessNode=dryRoughness.mul(float(1).sub(wet.mul(.15)));
-  material.clearcoatNode=float(.38).add(wet.mul(.62)).min(1);
-  material.clearcoatRoughnessNode=float(.23).mul(float(1).sub(wet.mul(.97)));
-  material.clearcoatNormalNode=normalMap(texture(normal,uv),vec2(.27,-.27).mul(float(1).sub(wet)));
+  material.roughnessNode=mix(dryRoughness.mul(float(1).sub(halo.mul(.10))),float(.055),wet);
+  material.clearcoatNode=mix(float(.38).add(halo.mul(.07)),float(.98),wet);
+  material.clearcoatRoughnessNode=mix(float(.23).sub(halo.mul(.02)),float(.055),wet);
+  // A slightly softened room reflection supplies the sheen without painted highlight shapes.
+  material.specularColorNode=mix(vec3(.04),vec3(.16),wet);
+  const coatTexture=texture(normal,uv).xyz;
+  const coatXY=coatTexture.xy.sub(.5).mul(vec2(.27,-.27)).mul(float(1).sub(wet)).add(surfaceWave).add(.5);
+  material.clearcoatNormalNode=normalMap(vec3(coatXY,coatTexture.z),vec2(1));
   material.emissiveNode=albedo.mul(texture(optics.lightTexture,opticalUV).rgb).mul(light.irradiance/Math.PI).mul(vec3(light.color.r,light.color.g,light.color.b)).mul(inside).mul(float(1).sub(facilityShadow));
   const mesh=new THREE.Mesh(new THREE.PlaneGeometry(200,200),material);
   mesh.rotation.x=-Math.PI/2;mesh.position.y=-.00005;
-  return {mesh,reflectorTarget:reflection.target,dispose:()=>{mesh.geometry.dispose();material.dispose();[base,normal,roughness].forEach(t=>t.dispose());}};
+  return {mesh,dispose:()=>{mesh.geometry.dispose();material.dispose();[base,normal,roughness].forEach(t=>t.dispose());}};
 }

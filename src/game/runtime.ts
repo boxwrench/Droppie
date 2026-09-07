@@ -14,7 +14,6 @@ import { OpticalTransport } from '../graphics/transport.ts';
 import { createComposite } from '../graphics/composite.ts';
 import { FixedStepper } from './fixed-step.ts';
 import { FacilityShadows } from '../graphics/facility-shadows.ts';
-import { WetSurface } from '../water/wet-surface.ts';
 import { SplashParticles } from '../water/splash-particles.ts';
 import { Puddle } from '../water/puddle.ts';
 import { quality, observeFrame } from '../graphics/quality.ts';
@@ -37,29 +36,33 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   const baby=new Baby(body);scene.add(baby.group);
   const optics=new RefractiveLightField(body.cage.opticalSurface,environment.incoming,ABSORPTION);
   const facilityShadows=new FacilityShadows(environment.incoming);
-  const wetness=new WetSurface();
-  const splash=new SplashParticles(wetness);scene.add(splash.mesh);
-  const puddle=new Puddle(wetness);scene.add(puddle.mesh);
-  const table=await makeTable(optics,environment,facilityShadows,wetness);scene.add(table.mesh);
-  scene.add(table.reflectorTarget);
+  const splash=new SplashParticles();scene.add(splash.mesh);
+  const puddle=new Puddle();
+  const table=await makeTable(optics,environment,facilityShadows,puddle);scene.add(table.mesh);
   const composite=createComposite(renderer,scene,camera);
   const rig=new Locomotion(body);
   rig.onContact=(speed,foot)=>{
-    sound.contact(speed,foot);wetness.impact(body.center,speed);
-    // Only a real landing sprays; a gentle touch just wets the wood.
-    if(speed>.22)splash.burst(body.center,Math.min(speed,.9)*.55,4+Math.round(Math.min(speed,.9)*5),rig.velocity);
+    sound.contact(speed,foot);
+    const impact=puddle.impact(body.center,speed);
+    if(impact) {
+      // Rendering orientation only; contact thresholds and particle emission are unchanged.
+      const horizontal=Math.hypot(rig.velocity.x,rig.velocity.z);
+      puddle.direction.value.set(horizontal>.001?rig.velocity.x/horizontal:1,horizontal>.001?rig.velocity.z/horizontal:0);
+      puddle.aspect.value=1.03+Math.min(1,horizontal/.4)*.12;
+    }
+    if(impact&&speed>.35)splash.burst(body.center,Math.min(speed,.9)*.55,7+Math.round(Math.min(1,(speed-.35)/.45)*3),rig.velocity);
   };
   const physicsClock=new FixedStepper(PHYS.step);
   let lastTime=0,disposed=false;
-  const reset=()=>{sound.stopFacilities();input.clear();rig.reset();body.reset();input.recenter();baby.resetFace();physicsClock.reset();wetness.clear();splash.clear();puddle.hide();};
+  const reset=()=>{sound.stopFacilities();input.clear();rig.reset();body.reset();input.recenter();baby.resetFace();physicsClock.reset();splash.clear();puddle.hide();};
   const input=new Input(camera,renderer.domElement,body,baby.mesh,rig,sound,reset);
   if(import.meta.env.DEV)Object.defineProperty(window,'dropletDebug',{configurable:true,get:()=>({
     center:body.center.toArray(),sleeping:body.sleeping,grabs:body.grabs.length,volume:body.volumeRatio(),
     camera:camera.position.toArray(),finite:body.isFinite(),quality:{...quality},
     thickness:[Math.min(...body.surface.geometry.attributes.opticalThickness.array),Math.max(...body.surface.geometry.attributes.opticalThickness.array)],
-    showPuddle:(radius?:number)=>puddle.show(body.center,radius??.052),
+    showPuddle:(radius?:number,lifetime?:number)=>puddle.show(body.center,radius??.045,lifetime??1),
+    puddleState:{visible:puddle.visible,radius:puddle.radius.value,strength:puddle.strength.value},
     hidePuddle:()=>puddle.hide(),
-    forceWetTrail:()=>{for(let i=-6;i<=6;i++)wetness.add({x:body.center.x+i*.012,z:body.center.z+i*.006,radius:.05,strength:1,lifetime:600});},
     splash:(count?:number,speed?:number)=>splash.burst(body.center,speed??.55,count??24,rig.velocity),
   })});
   const transport=new OpticalTransport(optics,body,camera,environment.incoming,fail);
@@ -95,13 +98,13 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   lastTime=performance.now();
   const renderedCamera=new THREE.Vector3(Infinity,Infinity,Infinity);
   const renderedRotation=new THREE.Quaternion();
-  const lastWet=new THREE.Vector2(body.center.x,body.center.z);
   let renderedSurface=-1,renderedFace=-1,renderedThickness=-1,renderedDpr=-1;
   let renderedSize='';
   const frame=(time:number)=>{
     if(disposed)return;
     try {
-      const dt=Math.min(.05,Math.max(0,(time-lastTime)/1000));lastTime=time;
+      const effectDt=Math.max(0,(time-lastTime)/1000);
+      const dt=Math.min(.05,effectDt);lastTime=time;
       if(document.hidden){physicsClock.reset();return;}
       const steps=physicsClock.advance(dt,()=>{
         input.step(PHYS.step);rig.step(PHYS.step);
@@ -114,24 +117,8 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
       baby.update(dt);
       if(observeFrame(dt))resize();
       transport.rate=quality.opticalHz;
-      // Wetness comes from the part of him actually touching the wood, not from
-      // his centre of mass: as he squishes and slides the mark follows the
-      // trailing contact patch instead of looking like stamps dropped from above.
-      let sx=0,sz=0,weight=0;
-      for(let i=0;i<body.contact.length;i++) {
-        const c=body.contact[i];if(c<=0)continue;
-        const w=c*body.mass[i];sx+=body.x[i*3]*w;sz+=body.x[i*3+2]*w;weight+=w;
-      }
-      if(weight>0) {
-        const wx=sx/weight,wz=sz/weight;
-        if(Math.hypot(wx-lastWet.x,wz-lastWet.y)>.0025) {
-          wetness.add({x:wx,z:wz,radius:.024,strength:.8,lifetime:4});
-          lastWet.set(wx,wz);
-        }
-      }
-      wetness.update(dt,body.center);
       splash.update(dt);
-      puddle.update(dt);
+      const puddleChanged=puddle.update(effectDt);
       input.update(dt);
       sound.listen(camera);
       transport.follow();
@@ -141,7 +128,7 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
       const faceVersion=baby.group.children.reduce((sum,child)=>sum+(((child as THREE.Mesh).geometry?.attributes.position as THREE.BufferAttribute|undefined)?.version??0),0);
       const thicknessVersion=body.surface.geometry.attributes.opticalThickness.version;
       const size=renderer.domElement.width+','+renderer.domElement.height;
-      if(!body.sleeping||wetness.drying||splash.active||puddle.visible||renderedSurface!==body.surfaceRevision||renderedFace!==faceVersion||
+      if(!body.sleeping||splash.active||puddleChanged||renderedSurface!==body.surfaceRevision||renderedFace!==faceVersion||
         renderedThickness!==thicknessVersion||renderedDpr!==renderer.getPixelRatio()||renderedSize!==size||
         renderedCamera.distanceToSquared(camera.position)>1e-12||renderedRotation.angleTo(camera.quaternion)>1e-6) {
         composite.render();renderedSurface=body.surfaceRevision;renderedFace=faceVersion;
@@ -154,7 +141,7 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   const dispose=()=>{
     if(disposed)return;disposed=true;
     void renderer.setAnimationLoop(null);input.dispose();sound.dispose();transport.dispose();resizeObserver.disconnect();cancelAnimationFrame(resizeFrame);
-    facilityShadows.dispose();composite.dispose();baby.dispose();table.dispose();wetness.dispose();splash.dispose();puddle.dispose();environment.dispose();optics.dispose();renderer.dispose();
+    facilityShadows.dispose();composite.dispose();baby.dispose();table.dispose();splash.dispose();environment.dispose();optics.dispose();renderer.dispose();
   };
   window.addEventListener('pagehide',event=>{if(!event.persisted)dispose();});
   if(import.meta.hot)import.meta.hot.dispose(dispose);
