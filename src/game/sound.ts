@@ -32,9 +32,10 @@ export class JellySound {
 
   constructor() {
     const signal=this.abort.signal;
-    window.addEventListener('pointerdown',this.unlockFromGesture,{signal});
-    window.addEventListener('touchstart',this.unlockFromGesture,{passive:true,signal});
-    window.addEventListener('keydown',this.unlockFromGesture,{signal});
+    // Chrome counts pointerup, touchend and click as user activation too, so
+    // take every chance to unlock rather than only the first touch down.
+    for(const type of ['pointerdown','pointerup','touchstart','touchend','click','keydown'])
+      window.addEventListener(type,this.unlockFromGesture,{passive:true,signal});
     document.addEventListener('visibilitychange',this.handleVisibility,{signal});
   }
 
@@ -83,11 +84,18 @@ export class JellySound {
     if(!context||context.state==='closed')return Promise.resolve();
     this.primeOutput(context);
     if(context.state==='running') {this.startMusic();return Promise.resolve();}
-    if(this.resumePromise)return this.resumePromise;
+    // Chrome leaves resume() *pending* rather than rejecting when it declines
+    // to start a context, so caching that promise and returning it on later
+    // gestures means one declined attempt blocks every retry and the page stays
+    // silent for good. Each gesture gets its own attempt; resume() on a running
+    // context resolves immediately, so retrying costs nothing.
+    let attempt:Promise<void>;
     try {
-      this.resumePromise=context.resume().then(()=>this.startMusic()).catch(()=>{}).finally(()=>{this.resumePromise=null;});
-    } catch {this.resumePromise=null;return Promise.resolve();}
-    return this.resumePromise;
+      attempt=context.resume().then(()=>this.startMusic()).catch(()=>{});
+    } catch {return Promise.resolve();}
+    this.resumePromise=attempt;
+    void attempt.then(()=>{if(this.resumePromise===attempt)this.resumePromise=null;});
+    return attempt;
   }
 
   toggle() {
