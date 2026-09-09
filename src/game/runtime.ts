@@ -52,6 +52,7 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
     }
     if(impact&&speed>.35)splash.burst(body.center,Math.min(speed,.9)*.55,7+Math.round(Math.min(1,(speed-.35)/.45)*3),rig.velocity);
     if(impact&&speed>.35)sound.splash(Math.min(1,(speed-.35)/.45));
+    if(impact&&speed>.35)sound.blup(Math.min(1,(speed-.35)/.45));
   };
   const physicsClock=new FixedStepper(PHYS.step);
   let lastTime=0,disposed=false;
@@ -66,6 +67,7 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
     hidePuddle:()=>puddle.hide(),
     splash:(count?:number,speed?:number)=>splash.burst(body.center,speed??.55,count??24,rig.velocity),
     soundHop:()=>sound.hop(),soundSplash:()=>sound.splash(.8),
+    soundGiggle:()=>sound.giggle(),soundBlup:()=>sound.blup(.8),
     musicOn:()=>sound.musicOn(),musicOff:()=>sound.musicOff(),
   })});
   const transport=new OpticalTransport(optics,body,camera,environment.incoming,fail);

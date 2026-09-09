@@ -4,6 +4,7 @@ import { FacilityAudio, type FacilitySoundEvent } from './facility-sound.ts';
 type AudioWindow=Window&{webkitAudioContext?:typeof AudioContext};
 type ToneShape=OscillatorType;
 const MUSIC_URL=new URL('../assets/music/Button_Nose_Parade.mp3',import.meta.url).href;
+const HOP_SCALE=[261.63,293.66,329.63,392,440,523.25];
 
 /** One shared Web Audio graph for physical contact, cartoon cues, and music. */
 export class JellySound {
@@ -25,7 +26,9 @@ export class JellySound {
   private musicEnabled=true;
   private musicSource:AudioBufferSourceNode|null=null;
   private musicBuffer:AudioBuffer|null=null;
+  private musicFetchPromise:Promise<ArrayBuffer|null>|null=null;
   private musicLoadPromise:Promise<AudioBuffer|null>|null=null;
+  private hopIndex=0;
   private musicStep=0;
   private musicNextTime=0;
   muted=false;
@@ -37,6 +40,27 @@ export class JellySound {
     for(const type of ['pointerdown','pointerup','touchstart','touchend','click','keydown'])
       window.addEventListener(type,this.unlockFromGesture,{passive:true,signal});
     document.addEventListener('visibilitychange',this.handleVisibility,{signal});
+    // Begin the music NETWORK fetch during startup so the bytes are already
+    // here when the first gesture unlocks audio. This never creates an
+    // AudioContext and never blocks startup; decoding still waits for unlock.
+    try {
+      void this.prefetchMusic();
+    } catch { /* A failed prefetch stays graceful; the fallback remains. */ }
+  }
+
+  /** Start (or reuse) the single background-music download. No AudioContext needed. */
+  private prefetchMusic():Promise<ArrayBuffer|null> {
+    if(!this.musicFetchPromise) {
+      try {
+        this.musicFetchPromise=fetch(MUSIC_URL).then(response=>{
+          if(!response.ok)throw new Error(`Music request failed: ${response.status}`);
+          return response.arrayBuffer();
+        }).catch(()=>null);
+      } catch {
+        this.musicFetchPromise=Promise.resolve(null);
+      }
+    }
+    return this.musicFetchPromise;
   }
 
   private unlockFromGesture=()=>{void this.unlock().catch(()=>{});};
@@ -152,12 +176,41 @@ export class JellySound {
 
   hop() {
     const ctx=this.context;if(!ctx||this.muted)return;
-    const t=ctx.currentTime;this.tone(t,320,115,.24,.22,'triangle');this.tone(t+.015,640,230,.19,.08,'sine');
+    const t=ctx.currentTime,note=HOP_SCALE[this.hopIndex++%HOP_SCALE.length];
+    // The boing rises into a note from the music's C-major palette instead of
+    // ending as an unrelated cartoon pitch.
+    this.tone(t,note*.58,note,.24,.22,'triangle');this.tone(t+.015,note*1.5,note*1.5,.19,.08,'sine');
   }
 
   grab() {
     const ctx=this.context;if(!ctx||this.muted)return;
     this.tone(ctx.currentTime,560,860,.075,.09,'sine');
+  }
+
+  /** Cute water-creature giggle: "bip-bloop-bloo!", ~245 ms, fully synthesized. */
+  giggle() {
+    const ctx=this.context;if(!ctx||this.muted)return;
+    const t=ctx.currentTime;
+    // Three tiny rising bubble pulses in the 220–330 Hz region, soft and round.
+    this.tone(t,220,278,.085,.16,'triangle');
+    this.tone(t+.075,248,305,.085,.15,'triangle');
+    this.tone(t+.15,275,330,.095,.14,'triangle');
+    // A very quiet airy sparkle keeps it watery rather than vocal.
+    this.tone(t+.005,440,556,.06,.035,'sine');
+    this.tone(t+.08,496,610,.06,.032,'sine');
+    this.tone(t+.155,550,660,.07,.03,'sine');
+    // Tiny filtered bubbling transient so it reads as liquid, not a whistle.
+    this.noise(t,.05,.028,1500,2.2);
+    this.noise(t+.075,.05,.024,1750,2.2);
+    this.noise(t+.15,.06,.022,2000,2.2);
+  }
+
+  /** One small round water "blup" for a meaningful hard landing. */
+  blup(strength=1) {
+    const ctx=this.context;if(!ctx||this.muted)return;
+    const t=ctx.currentTime,amount=Math.max(0,Math.min(1,strength));
+    this.tone(t,300,130,.11,.14+.08*amount,'triangle');
+    this.tone(t+.008,180,90,.10,.07,'sine');
   }
 
   /** A single oscillator voice whose pitch follows stretch amount. */
@@ -238,10 +291,16 @@ export class JellySound {
     }
     if(this.musicSource)return;
     if(this.musicLoadPromise===null) {
-      this.musicLoadPromise=fetch(MUSIC_URL).then(response=>{
-        if(!response.ok)throw new Error(`Music request failed: ${response.status}`);
-        return response.arrayBuffer();
-      }).then(data=>ctx.decodeAudioData(data)).catch(()=>null);
+      // The network fetch started at construction; here we only decode the
+      // already-fetched bytes once audio is unlocked. Single fetch, single decode.
+      this.musicLoadPromise=this.prefetchMusic().then(data=>{
+        if(!data)return null;
+        try {
+          return ctx.decodeAudioData(data);
+        } catch {
+          return null;
+        }
+      }).catch(()=>null);
     }
     void this.musicLoadPromise.then(buffer=>{
       if(buffer)this.musicBuffer=buffer;

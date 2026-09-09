@@ -6,6 +6,7 @@ import type { JellySound } from './sound.ts';
 import { surfaceGrab, projectGrabTarget, advanceGrabTarget } from '../physics/grab.ts';
 import { MAX_GRABS } from '../physics/soft-body-kernel.js';
 import { SurfaceBVH } from '../graphics/refractive-light.js';
+import { ReactionGate } from './reaction-gate.ts';
 
 type PointerGrab={
   grab:NonNullable<ReturnType<typeof surfaceGrab>>;
@@ -44,6 +45,8 @@ export class Input {
   readonly rig:Locomotion;
   readonly sound:JellySound;
   readonly reset:()=>void;
+  /** Event-time poke counting for playful reactions; tap semantics live above. */
+  readonly reactions=new ReactionGate();
   constructor(camera:THREE.PerspectiveCamera,canvas:HTMLCanvasElement,
     body:SoftBody,mesh:THREE.Mesh,rig:Locomotion,sound:JellySound,
     reset:()=>void) {
@@ -104,7 +107,16 @@ export class Input {
   }
   private begin=(e:PointerEvent)=>{
     if(this.bodyControlled())return;
-    if(e.button!==0||this.grabs.has(e.pointerId)||this.body.grabs.length>=MAX_GRABS)return;
+    if(e.button!==0)return;
+    const prior=this.grabs.get(e.pointerId);
+    if(prior) {
+      // A new press on a still-releasing pointer (taps faster than the fixed
+      // physics release) must not drop the new poke: settle the old grip now.
+      // Its tap already counted at pointerup, so nothing is double-counted.
+      if(!prior.releasePending)return;
+      this.finishRelease(e.pointerId);
+    }
+    if(this.grabs.has(e.pointerId)||this.body.grabs.length>=MAX_GRABS)return;
     // Only touch can add simultaneous grips; desktop mouse/pen keep one grip.
     if(this.body.grab&&(e.pointerType!=='touch'||[...this.grabs.values()].some(state=>state.pointerType!=='touch')))return;
     this.eventRay(e);
@@ -156,6 +168,18 @@ export class Input {
     // Mark released before releasing capture, which may itself dispatch an event.
     state.releasePending=true;
     state.tap=e.type==='pointerup'&&!state.moved&&performance.now()-state.downTime<280&&this.grabs.size===1;
+    if(state.tap) {
+      // Count at event time so rapid taps between physics steps are not lost.
+      // Hit, short-tap, no-drag, and no-UI semantics are all encoded in state.tap.
+      let giggle=false;
+      try {
+        giggle=this.reactions.poke(performance.now());
+      } catch { /* A gate failure must never break tap release. */ }
+      if(giggle) {
+        void this.sound.unlock().catch(()=>{});
+        this.sound.giggle();
+      }
+    }
     if(e.type==='pointerup')this.sound.release(Math.min(1,state.rawTarget.distanceTo(state.grab.point)/.08));
     this.sound.stopStretch();
     state.releaseStepsRemaining=state.physicsSteps===0?2:1;
@@ -193,6 +217,7 @@ export class Input {
   };
   clear=()=>{
     this.touchKeys.clear();
+    this.reactions.reset();
     this.sound.stopStretch();
     this.finishRelease();this.rig.move.set(0,0,0);
     document.querySelectorAll('.held').forEach(el=>el.classList.remove('held'));
