@@ -16,7 +16,7 @@ The bounded CPU grid uploads height and slope to a WebGPU texture.
 
 `src/graphics/pool.ts` adapts the reference's ray projection onto the tiled floor
 and derivative-based area-ratio caustics to Three.js TSL and a WebGPU render
-target. The water samples the same field for displacement, normals and floor
+target. The pool samples the same field for displacement, normals and floor
 refraction. The original duck, environment, assets and full sandbox are not used.
 
 Three.js Particle Fluids was evaluated as another option. Its pinned checkout

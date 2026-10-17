@@ -25,10 +25,11 @@ revision replaces those with an adaptation of **ScottieFox's CAUSTIC//LITE** at
   at 60 Hz, separately from the 240 Hz character solver.
 - `src/graphics/pool.ts`: a TSL adaptation of the reference's refracted light-ray
   projection and derivative-based area-ratio caustics. Surface displacement,
-  normals and bottom refraction use the same height field. The water is shaded
-  from an analytically refracted tiled floor, with depth absorption and the
-  existing environment lighting, rather than a second nested screen-transmission
-  pass. The basin uses the existing facility shadow pass.
+  normals and bottom refraction use the same height field. The basin shader
+  refracts its tiled receiver and applies depth absorption. A separate transparent
+  surface adds water tint and reflections, allowing Droppie's submerged geometry
+  to remain visible. This avoids drawing two tile images and avoids a second
+  nested screen-transmission pass. The basin uses the existing facility shadow pass.
 - `src/game/pool-physics.ts`: submerged drag/buoyancy and the deformed character's
   changing hull footprint drive the water. Entry and rebound can trigger bounded
   splash particles and sound. Wave heights stay within the pool's freeboard;

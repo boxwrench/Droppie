@@ -74,9 +74,18 @@ export class Pool {
     const shadowUV = positionWorld.xz.sub(optics.shadowOriginNode).div(optics.shadowSpanNode);
     const shadowInside = float(shadowUV.x.greaterThan(0).and(shadowUV.x.lessThan(1)).and(shadowUV.y.greaterThan(0)).and(shadowUV.y.lessThan(1)));
     const shadow = texture(optics.shadowTexture, shadowUV).r.mul(shadowInside);
-    const tileColor = tiledColor(positionLocal.xz);
-    const basinUV = positionLocal.xz.div(POOL.radius * 2).add(.5);
-    const poolLight = texture(this.caustics.texture, basinUV).rgb;
+    // Refract the floor pattern once, in the receiver. The separate surface
+    // can then stay genuinely transparent to Droppie's submerged geometry.
+    const viewRay = positionWorld.sub(cameraPosition).normalize();
+    const entry = cameraPosition.add(viewRay.mul(float(POOL.waterLevel).sub(cameraPosition.y).div(viewRay.y.min(-.01))));
+    const entryWater = texture(this.field, entry.xz.div(POOL.radius * 2).add(.5));
+    const entryNormal = vec3(entryWater.g.negate(), 1, entryWater.b.negate()).normalize();
+    const floorRay = refract(viewRay, entryNormal, 1 / 1.333);
+    const underwaterDistance = entryWater.r.add(POOL.waterLevel).div(floorRay.y.negate().max(.1));
+    const floorPoint = entry.xz.add(floorRay.xz.mul(underwaterDistance));
+    const absorption = vec3(-8, -2.2, -1.4).mul(underwaterDistance).exp();
+    const tileColor = tiledColor(floorPoint).mul(absorption);
+    const poolLight = texture(this.caustics.texture, floorPoint.div(POOL.radius * 2).add(.5)).rgb;
     ceramic.colorNode = mix(vec3(.89, .86, .77), tileColor, floor).mul(float(1).sub(shadow.mul(.4).mul(floor)));
     const opticalInside = float(opticalUV.x.greaterThan(0).and(opticalUV.x.lessThan(1)).and(opticalUV.y.greaterThan(0)).and(opticalUV.y.lessThan(1)));
     ceramic.emissiveNode = poolLight.mul(tileColor).mul(.32).add(texture(optics.lightTexture, opticalUV).rgb.mul(.14).mul(opticalInside)).mul(floor);
@@ -88,19 +97,15 @@ export class Pool {
     const waterMaterial = new THREE.MeshPhysicalNodeMaterial({
       color: '#73c7ce', roughness: .075, metalness: .03,
       ior: 1.333, clearcoat: 1, clearcoatRoughness: .06, alphaTest: .05,
+      transparent: true, opacity: .22, depthWrite: false,
     });
     waterMaterial.positionNode = positionLocal.add(vec3(0, water.r, 0));
     waterMaterial.normalNode = transformNormalToView(waterNormal);
-    // Refract the tiled receiver analytically, avoiding nested screen-space
-    // transmission around the already-translucent character.
-    const eye = positionWorld.sub(cameraPosition).normalize();
-    const ray = refract(eye, waterNormal, 1 / 1.333);
-    const length = water.r.add(POOL.waterLevel).div(ray.y.negate().max(.1));
-    const floorPoint = positionWorld.xz.add(ray.xz.mul(length));
-    const absorption = vec3(-8, -2.2, -1.4).mul(length).exp();
-    const refractedLight = texture(this.caustics.texture, floorPoint.div(POOL.radius * 2).add(.5)).rgb;
-    waterMaterial.colorNode = tiledColor(floorPoint).mul(absorption).mul(refractedLight.mul(.35).add(.6));
-    waterMaterial.opacityNode = float(positionLocal.xz.length().lessThan(POOL.radius));
+    // Blend after the transmissive character. Its above-water pixels still
+    // win the depth test; submerged pixels receive this clear water tint.
+    // No second floor image is blended over the original tiles or the body.
+    waterMaterial.colorNode = vec3(.25, .60, .64);
+    waterMaterial.opacityNode = float(positionLocal.xz.length().lessThan(POOL.radius)).mul(.22);
     this.water = new THREE.Mesh(grid.clone(), waterMaterial); this.water.position.y = POOL.waterLevel;
     this.water.geometry.computeBoundingBox(); this.water.geometry.boundingBox!.expandByScalar(surface.limit);
     this.group.add(this.water);
