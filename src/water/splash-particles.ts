@@ -47,7 +47,7 @@ export class SplashParticles {
    * they fly; `carry` is the body's own motion, so a sideways landing sprays
    * downrange instead of straight up.
    */
-  burst(origin: THREE.Vector3, speed: number, count: number, carry?: THREE.Vector3) {
+  burst(origin: THREE.Vector3, speed: number, count: number, carry?: THREE.Vector3, surfaceY = PHYS.floor) {
     let spawned = 0;
     for (const drop of this.drops) {
       if (spawned >= count) break;
@@ -55,7 +55,7 @@ export class SplashParticles {
       const angle = Math.random() * Math.PI * 2;
       const out = speed * (.35 + Math.random() * .55);
       const up = speed * (.55 + Math.random() * .75);
-      drop.position.set(origin.x + Math.cos(angle) * .012, PHYS.floor + .004 + Math.random() * .01, origin.z + Math.sin(angle) * .012);
+      drop.position.set(origin.x + Math.cos(angle) * .012, surfaceY + .004 + Math.random() * .01, origin.z + Math.sin(angle) * .012);
       drop.velocity.set(Math.cos(angle) * out, up, Math.sin(angle) * out);
       if (carry) drop.velocity.addScaledVector(carry, .35);
       drop.radius = .0013 + Math.random() * .0022;

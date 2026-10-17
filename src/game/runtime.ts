@@ -17,6 +17,8 @@ import { FacilityShadows } from '../graphics/facility-shadows.ts';
 import { SplashParticles } from '../water/splash-particles.ts';
 import { Puddle } from '../water/puddle.ts';
 import { quality, observeFrame } from '../graphics/quality.ts';
+import { PoolPhysics, POOL } from './pool-physics.ts';
+import { Pool } from '../graphics/pool.ts';
 
 export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   stage('Starting WebGPU');
@@ -28,7 +30,9 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   const scene=new THREE.Scene();
   scene.background=new THREE.Color('#e8d9c3');scene.fog=new THREE.Fog('#e8d9c3',2,12);
   const camera=new THREE.PerspectiveCamera(36,1,.001,40);
-  camera.position.set(.015,.115,.175);
+  // Start wide enough to see the shallow pool, including in portrait.
+  if(window.innerWidth<700)camera.position.set(.018,.23,.36);
+  else camera.position.set(.018,.145,.25);
   stage('Reading the light');
   const environment=await loadEnvironment(renderer,scene);
   stage('Shaping Droppie');
@@ -36,12 +40,21 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   const baby=new Baby(body);scene.add(baby.group);
   const optics=new RefractiveLightField(body.cage.opticalSurface,environment.incoming,ABSORPTION);
   const facilityShadows=new FacilityShadows(environment.incoming);
+  const poolPhysics=new PoolPhysics(body);
+  const pool=new Pool(poolPhysics,facilityShadows,optics);scene.add(pool.group);
   const splash=new SplashParticles();scene.add(splash.mesh);
   const puddle=new Puddle();
   const table=await makeTable(optics,environment,facilityShadows,puddle);scene.add(table.mesh);
   const composite=createComposite(renderer,scene,camera);
   const rig=new Locomotion(body);
+  poolPhysics.onSplash=(origin,speed,velocity)=>{
+    const power=Math.min(1,speed/.45);
+    splash.burst(origin,.18+power*.17,6+Math.round(power*6),velocity,POOL.waterLevel);
+    sound.splash(power);sound.blup(power*.6);
+  };
   rig.onContact=(speed,foot)=>{
+    // Water entry owns its own effects; don't paint a wood puddle under the dish.
+    if(poolPhysics.contains(body.center.x,body.center.z))return;
     sound.contact(speed,foot);
     const impact=puddle.impact(body.center,speed);
     if(impact) {
@@ -56,7 +69,7 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   };
   const physicsClock=new FixedStepper(PHYS.step);
   let lastTime=0,disposed=false;
-  const reset=()=>{sound.stopFacilities();sound.reset();input.clear();rig.reset();body.reset();input.recenter();baby.resetFace();physicsClock.reset();splash.clear();puddle.hide();};
+  const reset=()=>{sound.stopFacilities();sound.reset();input.clear();rig.reset();body.reset();input.recenter();baby.resetFace();physicsClock.reset();splash.clear();puddle.hide();poolPhysics.reset();pool.update();};
   const input=new Input(camera,renderer.domElement,body,baby.mesh,rig,sound,reset);
   if(import.meta.env.DEV)Object.defineProperty(window,'dropletDebug',{configurable:true,get:()=>({
     center:body.center.toArray(),sleeping:body.sleeping,grabs:body.grabs.length,volume:body.volumeRatio(),
@@ -65,12 +78,25 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
     showPuddle:(radius?:number,lifetime?:number)=>puddle.show(body.center,radius??.045,lifetime??1),
     puddleState:{visible:puddle.visible,radius:puddle.radius.value,strength:puddle.strength.value},
     hidePuddle:()=>puddle.hide(),
+    poolState:{enabled:poolPhysics.enabled,submerged:poolPhysics.submerged,active:poolPhysics.active,
+      ripples:poolPhysics.ripples.filter(ripple=>ripple.age<POOL.rippleLifetime).length},
+    screen:((p:THREE.Vector3)=>{const v=p.clone().project(camera);return [(v.x+1)*renderer.domElement.clientWidth/2,(1-v.y)*renderer.domElement.clientHeight/2];})(body.center),
     splash:(count?:number,speed?:number)=>splash.burst(body.center,speed??.55,count??24,rig.velocity),
     soundHop:()=>sound.hop(),soundSplash:()=>sound.splash(.8),
     soundGiggle:()=>sound.giggle(),soundBlup:()=>sound.blup(.8),
     musicOn:()=>sound.musicOn(),musicOff:()=>sound.musicOff(),
   })});
   const transport=new OpticalTransport(optics,body,camera,environment.incoming,fail);
+  const listeners=new AbortController();
+  document.querySelector('#pool')!.addEventListener('click',event=>{
+    pool.setEnabled(!poolPhysics.enabled);pool.update();body.wake();
+    splash.clear();puddle.hide();
+    const button=event.currentTarget as HTMLButtonElement;
+    button.setAttribute('aria-pressed',String(poolPhysics.enabled));
+    document.querySelector('.play-hints')!.textContent=poolPhysics.enabled?'tap to splash · pull to stretch · let go':'tap to boop · pull to stretch · let go';
+    if((event as MouseEvent).detail>0)button.blur();
+    void sound.unlock().catch(()=>{});
+  },{signal:listeners.signal});
   const resize=()=>resizeView(renderer,camera,input.controls);
   let resizeFrame=0;
   const resizeObserver=new ResizeObserver(()=>{
@@ -88,7 +114,8 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   });
   stage('Settling in');
   // Let contact establish itself before displaying the first frame.
-  for(let i=0;i<80;i++){rig.step(PHYS.step);body.step(PHYS.step);}
+  for(let i=0;i<80;i++){rig.step(PHYS.step);poolPhysics.step(PHYS.step);body.step(PHYS.step);poolPhysics.afterStep();}
+  poolPhysics.reset();pool.update();
   body.updateSurface();baby.update();input.update(1);
   facilityShadows.update(renderer);
   optics.update(renderer,body,true);
@@ -111,15 +138,18 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
       const effectDt=Math.max(0,(time-lastTime)/1000);
       const dt=Math.min(.05,effectDt);lastTime=time;
       if(document.hidden){physicsClock.reset();return;}
+      const poolWasActive=poolPhysics.active;
       const steps=physicsClock.advance(dt,()=>{
         input.step(PHYS.step);rig.step(PHYS.step);
-        body.step(PHYS.step);input.afterPhysicsStep();rig.afterStep();
+        poolPhysics.step(PHYS.step);body.step(PHYS.step);poolPhysics.afterStep();
+        input.afterPhysicsStep();rig.afterStep();
       });
       if(steps&&body.surfaceDirty) {
         if(!body.isFinite())throw new Error('The soft-body simulation produced an invalid state');
         body.updateSurface();
       }
       baby.update(dt);
+      pool.update();facilityShadows.update(renderer);
       if(observeFrame(dt))resize();
       transport.rate=quality.opticalHz;
       splash.update(dt);
@@ -133,7 +163,7 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
       const faceVersion=baby.group.children.reduce((sum,child)=>sum+(((child as THREE.Mesh).geometry?.attributes.position as THREE.BufferAttribute|undefined)?.version??0),0);
       const thicknessVersion=body.surface.geometry.attributes.opticalThickness.version;
       const size=renderer.domElement.width+','+renderer.domElement.height;
-      if(!body.sleeping||splash.active||puddleChanged||renderedSurface!==body.surfaceRevision||renderedFace!==faceVersion||
+      if(!body.sleeping||splash.active||puddleChanged||poolWasActive||poolPhysics.active||renderedSurface!==body.surfaceRevision||renderedFace!==faceVersion||
         renderedThickness!==thicknessVersion||renderedDpr!==renderer.getPixelRatio()||renderedSize!==size||
         renderedCamera.distanceToSquared(camera.position)>1e-12||renderedRotation.angleTo(camera.quaternion)>1e-6) {
         composite.render();renderedSurface=body.surfaceRevision;renderedFace=faceVersion;
@@ -145,8 +175,8 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   await renderer.setAnimationLoop(frame);
   const dispose=()=>{
     if(disposed)return;disposed=true;
-    void renderer.setAnimationLoop(null);input.dispose();sound.dispose();transport.dispose();resizeObserver.disconnect();cancelAnimationFrame(resizeFrame);
-    facilityShadows.dispose();composite.dispose();baby.dispose();table.dispose();splash.dispose();environment.dispose();optics.dispose();renderer.dispose();
+    void renderer.setAnimationLoop(null);listeners.abort();input.dispose();sound.dispose();transport.dispose();resizeObserver.disconnect();cancelAnimationFrame(resizeFrame);
+    facilityShadows.dispose();pool.dispose();composite.dispose();baby.dispose();table.dispose();splash.dispose();environment.dispose();optics.dispose();renderer.dispose();
   };
   window.addEventListener('pagehide',event=>{if(!event.persisted)dispose();});
   if(import.meta.hot)import.meta.hot.dispose(dispose);

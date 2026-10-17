@@ -114,6 +114,33 @@ export class FacilityCollision {
     return changed;
   }
 
+  /** A low hollow rim: approach from either side, or land on its top. */
+  resolveAnnulus(centerX:number,centerZ:number,inner:number,outer:number,minY:number,maxY:number,margin=.001) {
+    let changed=false;
+    const centerDistance=Math.hypot(this.body.center.x-centerX,this.body.center.z-centerZ);
+    // A body straddling the whole narrow wall is supported from below. Sending
+    // its two halves to opposite sides would let it form a tunnel through it.
+    // A held body also steps onto this low lip instead of getting pinned at
+    // its side while the tip stretches across the pool.
+    const straddling=centerDistance>inner-margin&&centerDistance<outer+margin&&this.body.center.y>maxY;
+    for(let iteration=0;iteration<COLLISION_ITERATIONS;iteration++)for(let sample=0;sample<this.sampleCount;sample++) {
+      this.readSample(sample);
+      const y=this.point[1];
+      if(y<minY-margin||y>=maxY+margin)continue;
+      const x=this.point[0]-centerX,z=this.point[2]-centerZ,d=Math.hypot(x,z);
+      if(d<=inner-margin||d>=outer+margin)continue;
+      const inside=d-(inner-margin),outside=outer+margin-d,top=maxY+margin-y;
+      if(straddling||this.body.grab||(top<inside&&top<outside))this.applyContact(sample,undefined,0,1,0,top);
+      else {
+        const direction=inside<outside?-1:1;
+        this.applyContact(sample,undefined,direction*x/d,0,direction*z/d,Math.min(inside,outside));
+      }
+      changed=true;
+    }
+    this.finish(changed);
+    return changed;
+  }
+
   private readSample(sample:number) {
     const offset=this.vertices[sample]*4,x=this.body.x;
     let px=0,py=0,pz=0;

@@ -10,7 +10,8 @@ physics, WebGPU rendering, interaction, and browser audio.
 Tap Droppie to hop. Drag the body or tip to stretch it, then release to throw
 it. Drag empty floor to orbit, pinch or scroll to zoom, press Space to hop, R
 to reset, and Escape to release. Sound unlocks after interaction; the buttons
-in the top-right mute sound and reset the toy.
+in the top-right toggle the shallow pool, mute sound and reset the toy. Droppie
+starts in the pool: hop to make ripples and a small splash. See [pool notes](docs/pool.md).
 
 The demo needs a WebGPU-capable recent browser and a secure context (HTTPS or
 localhost). The first visit downloads roughly 12 MB of textures and an HDR
@@ -199,6 +200,7 @@ The core checks are:
 
 ```sh
 npm run test:physics
+npm run test:pool
 npm run typecheck
 npm run lint
 npm run build

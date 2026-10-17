@@ -10,6 +10,8 @@
     "build:model": "node scripts/build-droplet.mjs",
     "build:kernel": "node scripts/build-kernel.mjs",
     "test:physics": "node --experimental-strip-types scripts/verify-droplet.mjs",
+    "test:pool": "node --experimental-strip-types scripts/verify-pool.mjs",
+    "test:pool:browser": "node scripts/verify-pool-browser.mjs",
     "test:swing": "node --experimental-strip-types scripts/verify-swing.mjs",
     "test:trampoline": "node --experimental-strip-types scripts/verify-trampoline.mjs",
     "test:facility-collision": "node --experimental-strip-types scripts/verify-facility-collision.mjs",
