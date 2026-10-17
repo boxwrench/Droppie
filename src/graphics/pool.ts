@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { float, positionLocal, positionWorld, cameraPosition, texture, uniform, uv, vec3, vec4, mix, refract, transformNormalToView } from 'three/tsl';
+import { float, positionLocal, positionWorld, cameraPosition, texture, uniform, uv, vec2, vec3, vec4, mix, refract, transformNormalToView } from 'three/tsl';
 import { POOL } from '../game/pool-physics.ts';
 import type { PoolPhysics } from '../game/pool-physics.ts';
 import type { FacilityShadows } from './facility-shadows.ts';
@@ -12,6 +12,12 @@ import type { RefractiveLightField } from './refractive-light.js';
  */
 export class Pool {
   readonly group = new THREE.Group();
+  private readonly enabledNode = uniform(1);
+  // The dish floor is only 0.1 mm above the moving 200 m tabletop. Mask the
+  // covered table fragments instead of relying on their nearly equal depths.
+  readonly tableMaskNode = this.enabledNode.lessThan(.5).or(
+    positionWorld.xz.sub(vec2(POOL.x, POOL.z)).length().greaterThan(POOL.outerRadius),
+  );
   private readonly basin: THREE.Mesh;
   private readonly water: THREE.Mesh;
   private readonly field: THREE.DataTexture;
@@ -113,6 +119,7 @@ export class Pool {
 
   setEnabled(enabled: boolean) {
     this.physics.enabled = enabled; this.physics.reset();
+    this.enabledNode.value = enabled ? 1 : 0;
     this.basin.visible = enabled; this.water.visible = enabled;
   }
 

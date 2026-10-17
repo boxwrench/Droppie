@@ -30,6 +30,9 @@ revision replaces those with an adaptation of **ScottieFox's CAUSTIC//LITE** at
   surface adds water tint and reflections, allowing Droppie's submerged geometry
   to remain visible. This avoids drawing two tile images and avoids a second
   nested screen-transmission pass. The basin uses the existing facility shadow pass.
+  The tabletop is masked beneath the dish while the pool is enabled. Its large,
+  moving plane otherwise competes with the nearly coplanar basin floor in the
+  depth buffer, causing intermittent dark flashes when Droppie is dragged.
 - `src/game/pool-physics.ts`: submerged drag/buoyancy and the deformed character's
   changing hull footprint drive the water. Entry and rebound can trigger bounded
   splash particles and sound. Wave heights stay within the pool's freeboard;
@@ -59,6 +62,8 @@ Reload manually after edits. Ordinary `npm run dev` is still available.
 - `DROPPIE_BROWSER=firefox npm run test:pool:browser`: Playwright Firefox with
   WebGPU enabled in its isolated test profile. Checks water-tap energy, landing
   splashes, grab/release, orbit, reset, toggle, sound and responsive layouts.
+  A repeated portrait drag also samples floor brightness to catch the dark-flash
+  regression while allowing normal wave shading.
 - The existing physics, multitouch, deformation, collision and performance
   checks, plus typecheck, lint and build, cover integration regressions.
 

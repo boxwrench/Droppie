@@ -1,4 +1,4 @@
-/* global window */
+/* global window, fetch, createImageBitmap, document */
 import assert from 'node:assert/strict';
 import { chromium, firefox } from 'playwright';
 
@@ -26,6 +26,21 @@ const ready = async page => {
   await page.locator('#loading.hidden').waitFor({timeout: 60000});
   await page.locator('#loading').evaluate(element => {element.style.transition = 'none';});
   assert((await state(page)).finite, 'finite body at startup');
+};
+const floorBrightness = async (page, clip) => {
+  const png = await page.screenshot({clip});
+  return page.evaluate(async encoded => {
+    const response = await fetch(`data:image/png;base64,${encoded}`);
+    const image = await createImageBitmap(await response.blob());
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width; canvas.height = image.height;
+    const context = canvas.getContext('2d');
+    context.drawImage(image, 0, 0); image.close();
+    const {data} = context.getImageData(0, 0, canvas.width, canvas.height);
+    let sum = 0;
+    for (let i = 0; i < data.length; i += 4) sum += data[i] * .2126 + data[i + 1] * .7152 + data[i + 2] * .0722;
+    return sum / (data.length / 4);
+  }, png.toString('base64'));
 };
 
 try {
@@ -77,6 +92,22 @@ try {
   const phone = await mobile.newPage();
   await ready(phone);
   await phone.screenshot({path: `/tmp/droppie-pool-v2-${engine}-mobile.png`});
+  // The tabletop used to win the depth test against the basin on some frames,
+  // darkening the entire pool. Average a wide floor band so a moving local
+  // shadow or caustic is not mistaken for the whole-pool brightness switch.
+  await phone.waitForFunction(() => window.dropletDebug.sleeping, {}, {timeout: 20000});
+  const dragStart = (await state(phone)).screen;
+  const probe = {x: 20, y: Math.round(dragStart[1]) - 35, width: 350, height: 90};
+  const brightness = [await floorBrightness(phone, probe)];
+  await phone.mouse.move(...dragStart); await phone.mouse.down();
+  for (let i = 0; i < 16; i++) {
+    await phone.mouse.move(dragStart[0] + Math.sin(i * Math.PI / 5) * 45, dragStart[1] - 8, {steps: 3});
+    brightness.push(await floorBrightness(phone, probe));
+  }
+  await phone.mouse.up();
+  const brightnessRange = Math.max(...brightness) - Math.min(...brightness);
+  assert(brightnessRange < brightness[0] * .16, `pool stays lit during dragging (brightness range ${brightnessRange.toFixed(1)})`);
+  await phone.getByRole('button', {name: 'Reset Droppie'}).click();
   const point = (await state(phone)).screen;
   const cdp = useFirefox ? null : await mobile.newCDPSession(phone);
   if (cdp) {

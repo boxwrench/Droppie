@@ -45,6 +45,7 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   const splash=new SplashParticles();scene.add(splash.mesh);
   const puddle=new Puddle();
   const table=await makeTable(optics,environment,facilityShadows,puddle);scene.add(table.mesh);
+  table.mesh.material.maskNode=pool.tableMaskNode;
   const composite=createComposite(renderer,scene,camera);
   const rig=new Locomotion(body);
   let poolSplashCount=0;
