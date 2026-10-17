@@ -75,7 +75,9 @@ turning the pool off hides the whole prop and cancels the stream and its effects
   smear from `SurfaceField.ts`. Drops inherit the moving lip's velocity, fall
   independently, and finish landing after the flow stops. Actual water crossings
   produce the wave/splash impulses. The stream uses thickness-dependent absorption
-  rather than blue surface pigment. This does not import the upstream SPH solver.
+  with a faint blue tint. The pool's lightly tinted surface is 28% opaque to help
+  show movement while keeping submerged Droppie visible. This does not import
+  the upstream SPH solver.
 - The prop shares the facility shadow pass and existing sound/mute behavior.
   Its idle state lets the renderer sleep normally.
 

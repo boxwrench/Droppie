@@ -90,8 +90,8 @@ export class BucketVisual {
     // FluidSurfaceRenderer's thickness-dependent Beer-Lambert appearance,
     // expressed through Three's physical material. A small surface response
     // keeps the narrow stream legible at phone size.
-    const streamMaterial = new THREE.MeshPhysicalNodeMaterial({color: '#ffffff', roughness: .04, transmission: .9,
-      attenuationColor: '#62bedc', attenuationDistance: .012,
+    const streamMaterial = new THREE.MeshPhysicalNodeMaterial({color: '#effaff', roughness: .04, transmission: .88,
+      attenuationColor: '#62bedc', attenuationDistance: .011,
       ior: 1.333, thickness: .007, clearcoat: .7, side: THREE.DoubleSide});
     const dropMaterial = streamMaterial.clone(); dropMaterial.thickness = .003;
     streamMaterial.thicknessNode = attribute('pourThickness', 'float');

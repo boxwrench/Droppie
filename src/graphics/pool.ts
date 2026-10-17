@@ -101,17 +101,17 @@ export class Pool {
     shadows.add(casters, new THREE.Box3(new THREE.Vector3(-POOL.outerRadius, 0, -POOL.outerRadius), new THREE.Vector3(POOL.outerRadius, POOL.rimHeight, POOL.outerRadius)));
 
     const waterMaterial = new THREE.MeshPhysicalNodeMaterial({
-      color: '#73c7ce', roughness: .075, metalness: .03,
+      color: '#79c9df', roughness: .075, metalness: .03,
       ior: 1.333, clearcoat: 1, clearcoatRoughness: .06, alphaTest: .05,
-      transparent: true, opacity: .22, depthWrite: false,
+      transparent: true, opacity: .28, depthWrite: false,
     });
     waterMaterial.positionNode = positionLocal.add(vec3(0, water.r, 0));
     waterMaterial.normalNode = transformNormalToView(waterNormal);
     // Blend after the transmissive character. Its above-water pixels still
     // win the depth test; submerged pixels receive this clear water tint.
     // No second floor image is blended over the original tiles or the body.
-    waterMaterial.colorNode = vec3(.25, .60, .64);
-    waterMaterial.opacityNode = float(positionLocal.xz.length().lessThan(POOL.radius)).mul(.22);
+    waterMaterial.colorNode = vec3(.24, .60, .72);
+    waterMaterial.opacityNode = float(positionLocal.xz.length().lessThan(POOL.radius)).mul(.28);
     this.water = new THREE.Mesh(grid.clone(), waterMaterial); this.water.position.y = POOL.waterLevel;
     this.water.geometry.computeBoundingBox(); this.water.geometry.boundingBox!.expandByScalar(surface.limit);
     this.group.add(this.water);
