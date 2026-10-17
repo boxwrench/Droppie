@@ -19,9 +19,29 @@ and derivative-based area-ratio caustics to Three.js TSL and a WebGPU render
 target. The pool samples the same field for displacement, normals and floor
 refraction. The original duck, environment, assets and full sandbox are not used.
 
-Three.js Particle Fluids was evaluated as another option. Its pinned checkout
-requires Three.js r184, while this project uses r185; none of its code was copied
-or imported. Droppie retains its existing XPBD character solver.
+## Three.js Particle Fluids — pour emission and motion stretch
+
+- Author: Daniel Greenheck.
+- Source: https://github.com/dgreenheck/threejs-particle-fluids
+- Pinned revision: `26ebfd2985ddd5156c932c97697980cfda92ffdf`.
+- Original files: `demo/presets/honey.ts`, `demo/presets/tarp.ts`,
+  `src/fluids/render/SurfaceField.ts`.
+- Licence: MIT; full notice in
+  [LICENSES/threejs-particle-fluids-MIT.txt](LICENSES/threejs-particle-fluids-MIT.txt).
+
+`src/water/pour-particles.ts` adapts the actual disc-clipped lattice emission,
+spacing-based layer release, moving-source velocity and recycled particle slots
+from the honey/tarp demos. CPU ballistic particles replace the GPU/SPH particle
+buffers. Its capped velocity stretch adapts `SurfaceField.ts`'s motion-smear
+distance; `src/graphics/pour-bucket.ts` applies it to instanced droplet geometry.
+Particle crossings drive the existing pool waves and splash effects.
+
+The stream's thickness-dependent appearance was compared with
+`FluidSurfaceRenderer.ts`'s Beer-Lambert absorption; Three's existing physical
+material supplies that optical model here. The upstream SPH solver, voxel field
+and ray-marched surface renderer are not imported. The pinned package requires
+Three.js r184 and Droppie uses r185, so this is a selective source adaptation.
+Droppie retains its existing XPBD character solver.
 
 Existing Jelly-Baby-derived code and assets retain the terms documented in the
-README. This notice adds attribution for the pool adaptation.
+README. This notice adds attribution for the pool and pour adaptations.

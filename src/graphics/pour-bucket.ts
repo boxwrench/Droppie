@@ -1,8 +1,9 @@
 import * as THREE from 'three/webgpu';
-import { positionLocal, positionWorld, uniform, vec3, vec4 } from 'three/tsl';
+import { attribute, positionLocal, positionWorld, uniform, vec3, vec4 } from 'three/tsl';
 import { BUCKET, type PourBucket } from '../game/pour-bucket.ts';
 import { PHYS } from '../physics/constants.js';
 import type { FacilityShadows } from './facility-shadows.ts';
+import { POUR_PARTICLES, pourMotionStretch } from '../water/pour-particles.ts';
 
 const RINGS = 25, SIDES = 8;
 
@@ -79,17 +80,24 @@ export class BucketVisual {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(RINGS * SIDES * 3), 3));
     geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(RINGS * SIDES * 3), 3));
+    geometry.setAttribute('pourThickness', new THREE.BufferAttribute(new Float32Array(RINGS * SIDES), 1));
     const indices = [];
     for (let ring = 0; ring < RINGS - 1; ring++) for (let side = 0; side < SIDES; side++) {
       const a = ring * SIDES + side, b = ring * SIDES + (side + 1) % SIDES;
       indices.push(a, b, a + SIDES, b, b + SIDES, a + SIDES);
     }
     geometry.setIndex(indices);
-    const streamMaterial = new THREE.MeshPhysicalNodeMaterial({color: '#70c7e3', roughness: .07, transmission: .65,
-      ior: 1.333, thickness: .007, clearcoat: 1, side: THREE.DoubleSide});
+    // FluidSurfaceRenderer's thickness-dependent Beer-Lambert appearance,
+    // expressed through Three's physical material. A small surface response
+    // keeps the narrow stream legible at phone size.
+    const streamMaterial = new THREE.MeshPhysicalNodeMaterial({color: '#ffffff', roughness: .04, transmission: .9,
+      attenuationColor: '#62bedc', attenuationDistance: .012,
+      ior: 1.333, thickness: .007, clearcoat: .7, side: THREE.DoubleSide});
+    const dropMaterial = streamMaterial.clone(); dropMaterial.thickness = .003;
+    streamMaterial.thicknessNode = attribute('pourThickness', 'float');
     this.stream = new THREE.Mesh(geometry, streamMaterial); this.stream.frustumCulled = false; this.stream.renderOrder = 1;
     this.group.add(this.stream);
-    this.droplets = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 8, 6), streamMaterial, 10);
+    this.droplets = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 6, 4), dropMaterial, POUR_PARTICLES.capacity);
     this.droplets.frustumCulled = false; this.group.add(this.droplets);
     this.update();
   }
@@ -109,12 +117,14 @@ export class BucketVisual {
     const lip = BUCKET.baseY + BUCKET.height * c - (BUCKET.radius - BUCKET.pivotOffset) * s;
     const level = Math.min(BUCKET.baseY + .043 * c + BUCKET.pivotOffset * s, lip - .001);
     this.water.position.y = bottom + Math.max(0, level - bottom) * Math.sqrt(p.fill);
-    this.stream.visible = this.droplets.visible = p.enabled && p.flow > .02;
-    if (!this.stream.visible) return;
+    this.stream.visible = p.enabled && p.flow > .02;
+    this.droplets.visible = p.enabled && p.particles.active;
     const positions = this.stream.geometry.attributes.position as THREE.BufferAttribute;
     const normals = this.stream.geometry.attributes.normal as THREE.BufferAttribute;
-    for (let ring = 0; ring < RINGS; ring++) {
-      const fraction = ring / (RINGS - 1);
+    const thickness = this.stream.geometry.attributes.pourThickness as THREE.BufferAttribute;
+    const front = Math.min(1, Math.max(0, (p.elapsed - BUCKET.tipTime) / p.flightTime));
+    if (this.stream.visible) for (let ring = 0; ring < RINGS; ring++) {
+      const fraction = ring / (RINGS - 1) * front;
       p.sampleStream(fraction, this.center);
       this.tangent.copy(p.velocity); this.tangent.y -= PHYS.gravity * fraction * p.flightTime; this.tangent.normalize();
       this.normal.crossVectors(this.tangent, this.side).normalize();
@@ -124,15 +134,20 @@ export class BucketVisual {
         const nx = this.side.x * c + this.normal.x * s, ny = this.normal.y * s, nz = this.side.z * c + this.normal.z * s;
         positions.setXYZ(i, this.center.x + nx * radius, this.center.y + ny * radius, this.center.z + nz * radius);
         normals.setXYZ(i, nx, ny, nz);
+        thickness.setX(i, radius * 2);
       }
     }
-    positions.needsUpdate = normals.needsUpdate = true;
+    if (this.stream.visible) positions.needsUpdate = normals.needsUpdate = thickness.needsUpdate = true;
     for (let i = 0; i < this.droplets.count; i++) {
-      const fraction = ((p.elapsed * 1.8 + i / this.droplets.count) % 1) * .9 + .1;
-      p.sampleStream(fraction, this.center);
-      this.center.addScaledVector(this.side, Math.sin(i * 17 + p.elapsed * 9) * .003 * fraction);
-      const radius = (.001 + (i % 3) * .00035) * Math.sqrt(p.flow);
-      this.scale.set(radius, radius * 1.5, radius); this.matrix.compose(this.center, this.rotation, this.scale);
+      const drop = p.particles.drops[i], speed = drop.velocity.length();
+      const stretch = pourMotionStretch(speed);
+      this.center.copy(drop.position);
+      this.tangent.copy(drop.velocity).divideScalar(Math.max(.0001, speed));
+      this.center.addScaledVector(this.tangent, -stretch * .5);
+      this.rotation.setFromUnitVectors(UP, this.tangent);
+      this.scale.set(drop.radius, drop.radius + stretch * .5, drop.radius);
+      if (!drop.active) this.scale.setScalar(0);
+      this.matrix.compose(this.center, this.rotation, this.scale);
       this.droplets.setMatrixAt(i, this.matrix);
     }
     this.droplets.instanceMatrix.needsUpdate = true;
@@ -153,3 +168,5 @@ export class BucketVisual {
     this.group.clear(); this.group.removeFromParent();
   }
 }
+
+const UP = new THREE.Vector3(0, 1, 0);

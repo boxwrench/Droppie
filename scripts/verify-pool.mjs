@@ -6,6 +6,7 @@ import { Locomotion } from '../src/game/locomotion.ts';
 import { PoolPhysics, POOL } from '../src/game/pool-physics.ts';
 import { PoolSurface } from '../src/water/pool-surface.ts';
 import { PourBucket, BUCKET } from '../src/game/pour-bucket.ts';
+import { PourParticles, POUR_PARTICLES, pourMotionStretch } from '../src/water/pour-particles.ts';
 import { loadModel } from './load-model.mjs';
 
 function setup(offset = 0, offsetZ = 0) {
@@ -178,4 +179,24 @@ for (const offset of [POOL.radius - .009, POOL.outerRadius + .009, (POOL.radius 
   assert.equal(bucket.knocks, 1, 'remaining near the stool cannot repeatedly retrigger the pour');
 }
 
-console.log('Pool physics passed: dry equivalence, sleep, entries, reset, bounded waves, rim contacts, bucket pour/recovery and real stool bump.');
+// The reference emitter releases travelling droplets, not beads teleported
+// along a curve. Impacts happen only after flight, and the tail drains at stop.
+{
+  const emitter = new PourParticles(), source = new Vector3(.08, .11, -.04), velocity = new Vector3(-.1, -.02, 0);
+  let hits = 0;
+  for (let i = 0; i < 12; i++) {
+    source.x += .0002;
+    hits += emitter.step(1 / 120, source, velocity, 1, POOL.waterLevel);
+  }
+  assert.equal(hits, 0, 'water cannot splash before completing its flight');
+  assert(emitter.activeCount > 0 && emitter.activeCount <= POUR_PARTICLES.capacity, 'emission storage stays bounded');
+  assert(emitter.drops.some(drop => drop.active && drop.velocity.x > -.09), 'droplets inherit the moving lip velocity');
+  for (let i = 0; i < 100; i++) hits += emitter.step(1 / 120, source, velocity, 0, POOL.waterLevel);
+  assert(hits > 0 && !emitter.active, 'remaining droplets fall into the pool after emission stops');
+  assert(emitter.drops.every(drop => [...drop.position.toArray(), ...drop.velocity.toArray()].every(Number.isFinite)), 'particle state stays finite');
+  assert(pourMotionStretch(100) <= POUR_PARTICLES.spacing * 3, 'fast droplets cannot stretch across the scene');
+  emitter.step(.1, source, velocity, 1, POOL.waterLevel); emitter.step(5, source, velocity, 1, POOL.waterLevel);
+  assert(!emitter.active, 'long frame clears the emitter without a catch-up burst');
+}
+
+console.log('Pool physics passed: dry equivalence, sleep, entries, bounded waves, rim contacts, bucket recovery, real stool bump and reference pour emission/tail.');

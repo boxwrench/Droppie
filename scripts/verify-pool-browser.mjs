@@ -65,10 +65,12 @@ try {
   await page.mouse.click(...(await state(page)).bucketScreen);
   await page.waitForFunction(() => window.dropletDebug.bucketState.flow > .5, {}, {timeout: 15000});
   await page.waitForFunction(() => window.dropletDebug.bucketState.impacts > 1, {}, {timeout: 10000});
+  assert((await state(page)).bucketState.particles > 0 && (await state(page)).bucketState.particles <= 128, 'reference emitter produces bounded airborne drops');
   assert((await state(page)).poolState.energy > .00001, 'pouring stream makes real pool waves');
   await page.screenshot({path: `/tmp/droppie-bucket-${engine}-pouring.png`});
   await page.waitForFunction(() => window.dropletDebug.bucketState.phase === 'ready', {}, {timeout: 20000});
   assert.equal((await state(page)).bucketState.fill, 1, 'bucket refills automatically');
+  assert.equal((await state(page)).bucketState.particles, 0, 'pour tail drains before recovery');
   await page.getByRole('button', {name: 'Reset Droppie'}).click();
   const bumpStart = (await state(page)).screen, bumpTarget = (await state(page)).stoolScreen;
   await page.mouse.move(...bumpStart); await page.mouse.down();
@@ -136,6 +138,7 @@ try {
   await phone.getByRole('button', {name: 'Reset Droppie'}).click();
   await phone.touchscreen.tap(...(await state(phone)).bucketScreen);
   await phone.waitForFunction(() => window.dropletDebug.bucketState.flow > .5, {}, {timeout: 15000});
+  await phone.waitForFunction(() => window.dropletDebug.bucketState.impacts > 1, {}, {timeout: 10000});
   await phone.screenshot({path: `/tmp/droppie-bucket-${engine}-phone.png`});
   assert((await state(phone)).bucketState.knocks === 1, 'phone tap tips bucket');
   await phone.getByRole('button', {name: 'Reset Droppie'}).click();

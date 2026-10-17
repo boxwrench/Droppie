@@ -16,6 +16,8 @@ stir it. Bump or tap the little stool to tip its bucket: it pours into the pool,
 then returns upright and refills after a few seconds. See [pool notes](docs/pool.md)
 and [reference credits](THIRD_PARTY_NOTICES.md).
 
+For graphics/effect work, start with the [resource guide](docs/resources.md).
+
 The demo needs a WebGPU-capable recent browser and a secure context (HTTPS or
 localhost). The first visit downloads roughly 12 MB of textures and an HDR
 environment; later visits use the browser cache.

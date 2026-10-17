@@ -42,9 +42,9 @@ revision replaces those with an adaptation of **ScottieFox's CAUSTIC//LITE** at
   bodies step onto the lip; a body initially astride it is depenetrated with a
   volume-preserving translation.
 
-Three.js Particle Fluids was evaluated directly. Its current implementation
-requires r184; Droppie uses r185. It is not installed or represented as the
-active solver. Droppie keeps the existing XPBD solver, floor and grab behavior.
+Three.js Particle Fluids supplies the selective pour adaptations described below.
+Its pinned package requires r184; Droppie uses r185. Its full solver is not
+installed. Droppie keeps the existing XPBD solver, floor and grab behavior.
 This is a height-field pool, not a 3D particle liquid: the pool does not overturn
 or merge Droppie into the water.
 
@@ -67,9 +67,15 @@ turning the pool off hides the whole prop and cancels the stream and its effects
   Droppie. This is an authored secondary effect rather than a new fluid solver.
 - `src/graphics/pour-bucket.ts` builds the stool, hollow enamel pail and wire
   handle. Its horizontal water surface is clipped to the tilted bucket interior.
-  One reusable stream mesh and ten instanced beads show the pour; the existing
+  One reusable stream mesh and up to 128 instanced droplets show the pour; the existing
   bounded splash particles supply spray at the landing point. Meshes and
   materials are created once, with no per-frame geometry allocation.
+- `src/water/pour-particles.ts` adapts the actual layered disc emitter and slot
+  recycling from Particle Fluids' honey/tarp demos, plus its capped velocity
+  smear from `SurfaceField.ts`. Drops inherit the moving lip's velocity, fall
+  independently, and finish landing after the flow stops. Actual water crossings
+  produce the wave/splash impulses. The stream uses thickness-dependent absorption
+  rather than blue surface pigment. This does not import the upstream SPH solver.
 - The prop shares the facility shadow pass and existing sound/mute behavior.
   Its idle state lets the renderer sleep normally.
 

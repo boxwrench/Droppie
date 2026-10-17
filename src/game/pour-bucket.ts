@@ -3,6 +3,7 @@ import type { SoftBody } from '../physics/soft-body.js';
 import { FacilityCollision, type CollisionBox } from '../physics/facility-collision.ts';
 import { PHYS } from '../physics/constants.js';
 import { POOL, type PoolPhysics } from './pool-physics.ts';
+import { PourParticles } from '../water/pour-particles.ts';
 
 export const BUCKET = {
   x: .098, z: -.042, inwardX: -.96, inwardZ: -.28,
@@ -27,6 +28,7 @@ export class PourBucket {
   readonly source = new Vector3();
   readonly impact = new Vector3();
   readonly velocity = new Vector3();
+  readonly particles = new PourParticles();
   flightTime = 0;
   onKnock: () => void = () => {};
   onImpact: (point: Vector3, strength: number) => void = () => {};
@@ -35,6 +37,8 @@ export class PourBucket {
   private readonly collision: FacilityCollision;
   private readonly boxes: CollisionBox[] = [];
   private pulseTime = 0;
+  private pendingHits = 0;
+  private readonly lastHit = new Vector3();
   private clearTime = .5;
   private armed = true;
 
@@ -58,6 +62,7 @@ export class PourBucket {
   knock() {
     if (!this.enabled || this.active) return false;
     this.phase = 'tipping'; this.elapsed = 0; this.pulseTime = 0;
+    this.particles.clear(); this.pendingHits = 0;
     this.armed = false; this.knocks++; this.onKnock();
     return true;
   }
@@ -66,6 +71,7 @@ export class PourBucket {
     this.phase = 'ready'; this.angle = 0; this.fill = 1; this.flow = 0;
     this.elapsed = 0; this.pulseTime = 0; this.armed = true; this.clearTime = .5;
     this.knocks = 0; this.impacts = 0; this.updateJet();
+    this.particles.clear(); this.pendingHits = 0;
   }
 
   step(dt: number) {
@@ -87,16 +93,18 @@ export class PourBucket {
       this.phase = 'refilling'; this.angle = 0; this.fill = smooth(t / BUCKET.refillTime);
     } else {
       this.phase = 'ready'; this.angle = 0; this.fill = 1; this.elapsed = 0;
+      this.particles.clear(); this.pendingHits = 0;
     }
     this.updateJet();
-    if (this.flow <= .02) return;
+    const hits = this.particles.step(dt, this.source, this.velocity, this.flow, POOL.waterLevel);
+    if (hits) { this.pendingHits += hits; this.lastHit.copy(this.particles.hitPoint); }
     this.pulseTime += Math.min(dt, .25);
-    // A bounded series of small impulses drives the existing reference wave
-    // solver. No accumulating water level, extra liquid solver or timer queue.
-    while (this.pulseTime >= .12) {
-      this.pulseTime -= .12;
-      this.pool.disturb(this.impact.x, this.impact.z, .22 * this.flow);
-      this.impacts++; this.onImpact(this.impact, this.flow);
+    // Aggregate actual water crossings into a bounded wave/spray rate.
+    if (this.pendingHits && this.pulseTime >= .12) {
+      this.pulseTime = 0; this.pendingHits = 0; this.impact.copy(this.lastHit);
+      const strength = Math.max(.18, this.flow);
+      this.pool.disturb(this.impact.x, this.impact.z, .22 * strength);
+      this.impacts++; this.onImpact(this.impact, strength);
     }
   }
 

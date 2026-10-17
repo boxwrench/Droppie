@@ -105,7 +105,7 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
     poolState:{enabled:poolPhysics.enabled,submerged:poolPhysics.submerged,active:poolPhysics.active,
       energy:poolPhysics.surface.energy,maxHeight:poolPhysics.surface.maxHeight,revision:poolPhysics.surface.revision,
       radius:POOL.radius,depth:POOL.waterLevel,splashes:poolSplashCount},
-    bucketState:{enabled:bucket.enabled,phase:bucket.phase,angle:bucket.angle,fill:bucket.fill,flow:bucket.flow,knocks:bucket.knocks,impacts:bucket.impacts},
+    bucketState:{enabled:bucket.enabled,phase:bucket.phase,angle:bucket.angle,fill:bucket.fill,flow:bucket.flow,knocks:bucket.knocks,impacts:bucket.impacts,particles:bucket.particles.activeCount},
     bucketScreen:((p:THREE.Vector3)=>{const v=p.project(camera);return [(v.x+1)*renderer.domElement.clientWidth/2,(1-v.y)*renderer.domElement.clientHeight/2];})(new THREE.Vector3(BUCKET.x,BUCKET.baseY+BUCKET.height*.5,BUCKET.z)),
     stoolScreen:((p:THREE.Vector3)=>{const v=p.project(camera);return [(v.x+1)*renderer.domElement.clientWidth/2,(1-v.y)*renderer.domElement.clientHeight/2];})(new THREE.Vector3(BUCKET.x,BUCKET.seatHeight*.5,BUCKET.z)),
     waterScreen:((p:THREE.Vector3)=>{const v=p.project(camera);return [(v.x+1)*renderer.domElement.clientWidth/2,(1-v.y)*renderer.domElement.clientHeight/2];})(new THREE.Vector3(.08,POOL.waterLevel,.035)),
