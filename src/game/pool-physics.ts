@@ -2,18 +2,18 @@ import { Vector3 } from 'three/webgpu';
 import type { SoftBody } from '../physics/soft-body.js';
 import { PHYS } from '../physics/constants.js';
 import { FacilityCollision } from '../physics/facility-collision.ts';
+import { PoolSurface } from '../water/pool-surface.ts';
 
 /** A shallow dish on the existing floor; metres, not a second fluid solver. */
 export const POOL = {
-  x: 0, z: 0, radius: .076, outerRadius: .084,
-  waterLevel: .007, rimHeight: .012,
-  rippleCount: 6, rippleLifetime: 2.4,
+  x: 0, z: 0, radius: .145, outerRadius: .155,
+  waterLevel: .015, rimHeight: .024,
 } as const;
 
 export class PoolPhysics {
   enabled = true;
   submerged = 0;
-  readonly ripples: {x: number; z: number; age: number; strength: number}[] = Array.from({length: POOL.rippleCount}, () => ({x: 0, z: 0, age: POOL.rippleLifetime, strength: 0}));
+  readonly surface = new PoolSurface(POOL.radius, POOL.waterLevel);
   onSplash: (origin: Vector3, speed: number, velocity: Vector3) => void = () => {};
   private readonly collision: FacilityCollision;
   private readonly velocity = new Vector3();
@@ -22,12 +22,11 @@ export class PoolPhysics {
   private elapsed = 1;
   private trailX = 0;
   private trailZ = 0;
-  private nextRipple = 0;
   readonly body: SoftBody;
 
   constructor(body: SoftBody) {
     this.body = body;
-    this.collision = new FacilityCollision(body);
+    this.collision = new FacilityCollision(body, .001);
     this.reset();
   }
 
@@ -36,14 +35,13 @@ export class PoolPhysics {
   }
 
   get active() {
-    return this.enabled && this.ripples.some(ripple => ripple.age < POOL.rippleLifetime);
+    return this.enabled && this.surface.active;
   }
 
   reset() {
-    for (const ripple of this.ripples) { ripple.age = POOL.rippleLifetime; ripple.strength = 0; }
     this.elapsed = 1;
-    this.nextRipple = 0;
     this.submerged = this.immersion();
+    this.surface.reset();
     this.wet = this.submerged > .002;
     this.trailX = this.body.center.x;
     this.trailZ = this.body.center.z;
@@ -52,28 +50,30 @@ export class PoolPhysics {
   private immersion() {
     if (!this.enabled) return 0;
     const body = this.body;
-    let mass = 0;
+    let mass = 0, spread = 0;
     for (let i = 0; i < body.mass.length; i++) {
       const j = i * 3;
       if (this.contains(body.x[j], body.x[j + 2])) {
-        mass += body.mass[i] * Math.max(0, Math.min(1, (POOL.waterLevel - body.x[j + 1]) / .004));
+        const wetMass = body.mass[i] * Math.max(0, Math.min(1, (POOL.waterLevel - body.x[j + 1]) / .004));
+        mass += wetMass;
+        spread += wetMass * ((body.x[j] - body.center.x) ** 2 + (body.x[j + 2] - body.center.z) ** 2);
       }
     }
-    return mass / body.totalMass;
+    const fraction = mass / body.totalMass;
+    this.surface.setHull(body.center.x - POOL.x, body.center.z - POOL.z,
+      Math.max(.022, Math.min(.055, 2 * Math.sqrt(spread / Math.max(1e-9, mass)))), .012 * Math.sqrt(fraction));
+    return fraction;
   }
 
   disturb(x: number, z: number, strength: number) {
     if (!this.contains(x, z)) return;
-    const ripple = this.ripples[this.nextRipple];
-    ripple.x = x - POOL.x; ripple.z = z - POOL.z;
-    ripple.age = 0; ripple.strength = Math.max(0, Math.min(1, strength));
-    this.nextRipple = (this.nextRipple + 1) % this.ripples.length;
+    this.surface.disturb(x - POOL.x, z - POOL.z, strength);
   }
 
   /** Apply gentle submerged drag and buoyancy before the existing XPBD step. */
   step(h: number) {
     if (!this.enabled) return;
-    for (const ripple of this.ripples) ripple.age = Math.min(POOL.rippleLifetime, ripple.age + h);
+    this.surface.step(h);
     this.elapsed += h;
     const b = this.body;
     if (b.sleeping) return;
@@ -88,7 +88,7 @@ export class PoolPhysics {
       if (!wet) continue;
       // Water is slightly less dense than Droppie. The shallow pool slows the
       // submerged nodes without making the character float above the floor.
-      const drag = Math.exp(-10 * wet * h);
+      const drag = Math.exp(-7 * wet * h);
       b.velocity[j] *= drag;
       b.velocity[j + 1] = b.velocity[j + 1] * drag + PHYS.gravity * (1000 / PHYS.density) * wet * h;
       b.velocity[j + 2] *= drag;
@@ -107,17 +107,19 @@ export class PoolPhysics {
     if (min < POOL.outerRadius + .008 && max > POOL.radius - .008 && low < POOL.rimHeight + .002) {
       this.collision.resolveAnnulus(POOL.x, POOL.z, POOL.radius, POOL.outerRadius, PHYS.floor, POOL.rimHeight);
     }
+    const previousSubmerged = this.submerged;
     this.submerged = this.immersion();
     const wet = this.submerged > .002;
     const speed = Math.max(0, -this.velocity.y) + Math.hypot(this.velocity.x, this.velocity.z) * .45;
-    if (wet && !this.wet && this.elapsed > .16 && speed > .04) {
+    const entering = !this.wet || this.submerged - previousSubmerged > .002;
+    if (wet && entering && this.elapsed > .22 && speed > .08) {
       // Clamp an edge entry to the water, rather than dropping its ripple just
       // outside the disk when only the leading edge of the body is submerged.
       const dx = b.center.x - POOL.x, dz = b.center.z - POOL.z;
       const scale = Math.min(1, (POOL.radius - .006) / Math.max(.001, Math.hypot(dx, dz)));
       this.origin.set(POOL.x + dx * scale, POOL.waterLevel, POOL.z + dz * scale);
-      this.disturb(this.origin.x, this.origin.z, Math.min(1, speed / .35));
-      if (speed > .12) this.onSplash(this.origin, speed, this.velocity);
+      this.disturb(this.origin.x, this.origin.z, Math.min(1, speed / .25));
+      this.onSplash(this.origin, speed, this.velocity);
       this.elapsed = 0;
       this.trailX = b.center.x; this.trailZ = b.center.z;
     } else if (wet && this.elapsed > .14 && Math.hypot(b.center.x - this.trailX, b.center.z - this.trailZ) > .008) {

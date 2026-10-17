@@ -23,7 +23,8 @@
     "test:performance": "node --experimental-strip-types scripts/verify-performance.mjs",
     "benchmark": "node --experimental-strip-types scripts/benchmark.mjs",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "preview:pool": "node scripts/preview-pool.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

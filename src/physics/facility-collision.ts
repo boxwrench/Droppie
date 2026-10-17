@@ -122,7 +122,25 @@ export class FacilityCollision {
     // its two halves to opposite sides would let it form a tunnel through it.
     // A held body also steps onto this low lip instead of getting pinned at
     // its side while the tip stretches across the pool.
-    const straddling=centerDistance>inner-margin&&centerDistance<outer+margin&&this.body.center.y>maxY;
+    const straddling=centerDistance>inner-margin&&centerDistance<outer+margin&&this.body.center.y>(minY+maxY)*.5;
+    if(straddling) {
+      // Depenetrate a body already astride a narrow lip as one translation.
+      // Per-sample pushes can otherwise trap a deep initial overlap on both
+      // sides. Translation preserves all tetrahedral volumes and orientation.
+      let lift=0;
+      for(let sample=0;sample<this.sampleCount;sample++) {
+        this.readSample(sample);
+        const d=Math.hypot(this.point[0]-centerX,this.point[2]-centerZ);
+        if(d>inner-margin&&d<outer+margin)lift=Math.max(lift,maxY+margin-this.point[1]);
+      }
+      if(lift>0) {
+        for(let i=1;i<this.body.x.length;i+=3) {
+          this.body.x[i]+=lift;
+          this.body.velocity[i]=Math.max(0,this.body.velocity[i]);
+        }
+        this.finish(true);this.body.grounded=true;return true;
+      }
+    }
     for(let iteration=0;iteration<COLLISION_ITERATIONS;iteration++)for(let sample=0;sample<this.sampleCount;sample++) {
       this.readSample(sample);
       const y=this.point[1];

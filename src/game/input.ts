@@ -29,9 +29,11 @@ export class Input {
   /** Facilities temporarily own the body while orbit controls remain available. */
   bodyControlled:()=>boolean=()=>false;
   facilityCameraDistance:()=>number|undefined=()=>undefined;
+  onBackgroundTap:(ray:THREE.Ray)=>void=()=>{};
   readonly controls:OrbitControls;
   private touchKeys=new Map<number,string>();
   private grabs=new Map<number,PointerGrab>();
+  private backgroundTaps=new Map<number,{x:number;y:number;time:number;moved:boolean}>();
   private raycaster=new THREE.Raycaster();
   private grabBVH:SurfaceBVH;
   private pointer=new THREE.Vector2();
@@ -49,14 +51,14 @@ export class Input {
   readonly reactions=new ReactionGate();
   constructor(camera:THREE.PerspectiveCamera,canvas:HTMLCanvasElement,
     body:SoftBody,mesh:THREE.Mesh,rig:Locomotion,sound:JellySound,
-    reset:()=>void) {
+    reset:()=>void,maxDistance=.42) {
     this.camera=camera;this.body=body;this.mesh=mesh;this.rig=rig;this.sound=sound;this.reset=reset;
     this.canvas=canvas;this.grabBVH=new SurfaceBVH(body.surface);
     this.controls=new OrbitControls(camera,canvas);
     const c=this.controls;
     c.target.copy(body.center);this.follow.copy(c.target);
     c.enablePan=false;c.enableDamping=true;c.dampingFactor=.07;
-    c.minDistance=.135;c.maxDistance=.42;c.minPolarAngle=.22;c.maxPolarAngle=1.10;
+    c.minDistance=.135;c.maxDistance=maxDistance;c.minPolarAngle=.22;c.maxPolarAngle=1.10;
     c.rotateSpeed=.65;c.zoomSpeed=.65;c.update();
     c.touches.ONE=THREE.TOUCH.ROTATE;c.touches.TWO=THREE.TOUCH.DOLLY_ROTATE;
     const signal=this.abort.signal;
@@ -125,7 +127,13 @@ export class Input {
     // triangle scan. This changes no grip position or binding semantics.
     this.grabBVH.refit();
     const ray=this.raycaster.ray,o=[ray.origin.x,ray.origin.y,ray.origin.z],d=[ray.direction.x,ray.direction.y,ray.direction.z];
-    const hit=this.grabBVH.hit(o,d);if(!hit)return;
+    const hit=this.grabBVH.hit(o,d);
+    if(!hit) {
+      const multi=this.backgroundTaps.size>0;
+      for(const tap of this.backgroundTaps.values())tap.moved=true;
+      this.backgroundTaps.set(e.pointerId,{x:e.clientX,y:e.clientY,time:performance.now(),moved:multi});
+      return;
+    }
     const ix=this.body.surface.indices,offset=hit.t*3;
     const face={a:ix[offset],b:ix[offset+1],c:ix[offset+2]};
     const point=ray.at(hit.distance,new THREE.Vector3());
@@ -145,6 +153,8 @@ export class Input {
     this.canvas.setPointerCapture(e.pointerId);this.canvas.classList.add('grabbing');
   };
   private pointerMove=(e:PointerEvent)=>{
+    const tap=this.backgroundTaps.get(e.pointerId);
+    if(tap&&Math.hypot(e.clientX-tap.x,e.clientY-tap.y)>8)tap.moved=true;
     const state=this.grabs.get(e.pointerId);
     if(state&&!state.releasePending) {
       if(e.pointerType==='mouse'&&(e.buttons&1)===0) {
@@ -161,7 +171,14 @@ export class Input {
   };
   private end=(e:PointerEvent)=>{
     const state=this.grabs.get(e.pointerId);
-    if(!state||state.releasePending)return;
+    if(!state) {
+      const tap=this.backgroundTaps.get(e.pointerId);this.backgroundTaps.delete(e.pointerId);
+      if(tap&&!tap.moved&&!this.body.grab&&e.type==='pointerup'&&performance.now()-tap.time<280&&Math.hypot(e.clientX-tap.x,e.clientY-tap.y)<8) {
+        this.eventRay(e);this.onBackgroundTap(this.raycaster.ray);
+      }
+      return;
+    }
+    if(state.releasePending)return;
     // pointerup itself may be the only event carrying an abrupt drag endpoint.
     if(e.type==='pointerup')this.captureDragTarget(e,state);
     e.preventDefault();e.stopImmediatePropagation();
@@ -216,6 +233,7 @@ export class Input {
     if(e.code==='Escape')this.finishRelease();
   };
   clear=()=>{
+    this.backgroundTaps.clear();
     this.touchKeys.clear();
     this.reactions.reset();
     this.sound.stopStretch();

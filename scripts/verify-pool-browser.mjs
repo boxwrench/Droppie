@@ -1,22 +1,30 @@
 /* global window */
 import assert from 'node:assert/strict';
-import { chromium } from 'playwright';
+import { chromium, firefox } from 'playwright';
 
 const url = process.env.DROPPIE_URL || 'http://127.0.0.1:5180';
-const browser = await chromium.launch({
+const useFirefox = process.env.DROPPIE_BROWSER === 'firefox';
+const engine = useFirefox ? 'firefox' : 'chromium';
+const browser = useFirefox ? await firefox.launch({headless: true, firefoxUserPrefs: {'dom.webgpu.enabled': true}}) : await chromium.launch({
   executablePath: '/usr/bin/google-chrome', headless: true,
   args: ['--no-sandbox', '--enable-unsafe-webgpu', '--use-angle=swiftshader', '--enable-features=Vulkan'],
 });
 const errors = [];
+const consoleJobs = [];
 const watch = page => {
   page.on('pageerror', error => errors.push(error.message));
-  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+  page.on('console', message => {
+    if (message.type() === 'error') consoleJobs.push(Promise.all(message.args().map(arg =>
+      arg.evaluate(value => typeof value === 'object' ? value?.message || String(value) : String(value)).catch(() => message.text())
+    )).then(values => errors.push(`${message.location().url}: ${values.join(' ')}`)));
+  });
 };
 const state = page => page.evaluate(() => window.dropletDebug);
 const ready = async page => {
   watch(page);
   await page.goto(url);
   await page.locator('#loading.hidden').waitFor({timeout: 60000});
+  await page.locator('#loading').evaluate(element => {element.style.transition = 'none';});
   assert((await state(page)).finite, 'finite body at startup');
 };
 
@@ -24,13 +32,19 @@ try {
   const page = await browser.newPage({viewport: {width: 1000, height: 850}});
   await ready(page);
   assert((await state(page)).poolState.enabled, 'pool enabled on first load');
-  await page.screenshot({path: '/tmp/droppie-pool-desktop.png'});
+  await page.screenshot({path: `/tmp/droppie-pool-v2-${engine}-desktop.png`});
   await page.waitForFunction(() => window.dropletDebug.sleeping, {}, {timeout: 20000});
+  const beforeWaterTap = (await state(page)).poolState.energy;
+  await page.mouse.click(...(await state(page)).waterScreen);
+  await page.waitForFunction(before => window.dropletDebug.poolState.energy > before + .0003, beforeWaterTap, {timeout: 10000});
+  assert((await state(page)).poolState.maxHeight > .001, 'water tap produces visible waves');
+  await page.screenshot({path: `/tmp/droppie-pool-v2-${engine}-water-tap.png`});
+  const beforeHop = (await state(page)).poolState.splashes;
   await page.keyboard.press('Space');
-  await page.waitForFunction(() => window.dropletDebug.poolState.active, {}, {timeout: 20000});
+  await page.waitForFunction(before => window.dropletDebug.poolState.splashes > before, beforeHop, {timeout: 20000});
   const splashed = await state(page);
   assert(splashed.finite && splashed.volume > .8 && splashed.volume < 1.2, 'hop and water re-entry preserve the body');
-  await page.screenshot({path: '/tmp/droppie-pool-splash.png'});
+  await page.screenshot({path: `/tmp/droppie-pool-v2-${engine}-splash.png`});
 
   await page.getByRole('button', {name: 'Toggle pool'}).click();
   let snapshot = await state(page);
@@ -59,16 +73,22 @@ try {
   assert(Math.hypot(snapshot.center[0], snapshot.center[2]) < .005, 'reset restores starting position');
   await page.close();
 
-  const mobile = await browser.newContext({viewport: {width: 390, height: 844}, deviceScaleFactor: 2, isMobile: true, hasTouch: true});
+  const mobile = await browser.newContext({viewport: {width: 390, height: 844}, deviceScaleFactor: 2, ...(!useFirefox ? {isMobile: true} : {}), hasTouch: true});
   const phone = await mobile.newPage();
   await ready(phone);
-  await phone.screenshot({path: '/tmp/droppie-pool-mobile.png'});
+  await phone.screenshot({path: `/tmp/droppie-pool-v2-${engine}-mobile.png`});
   const point = (await state(phone)).screen;
-  const cdp = await mobile.newCDPSession(phone);
-  await cdp.send('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: [{x: point[0], y: point[1], id: 1}]});
-  await cdp.send('Input.dispatchTouchEvent', {type: 'touchMove', touchPoints: [{x: point[0] + 25, y: point[1] - 40, id: 1}]});
+  const cdp = useFirefox ? null : await mobile.newCDPSession(phone);
+  if (cdp) {
+    await cdp.send('Input.dispatchTouchEvent', {type: 'touchStart', touchPoints: [{x: point[0], y: point[1], id: 1}]});
+    await cdp.send('Input.dispatchTouchEvent', {type: 'touchMove', touchPoints: [{x: point[0] + 25, y: point[1] - 40, id: 1}]});
+  } else {
+    await phone.mouse.move(...point); await phone.mouse.down();
+    await phone.mouse.move(point[0] + 25, point[1] - 40, {steps: 8});
+  }
   assert.equal((await state(phone)).grabs, 1, 'mobile touch grabs through the pool');
-  await cdp.send('Input.dispatchTouchEvent', {type: 'touchEnd', touchPoints: []});
+  if (cdp) await cdp.send('Input.dispatchTouchEvent', {type: 'touchEnd', touchPoints: []});
+  else await phone.mouse.up();
   await phone.waitForFunction(() => window.dropletDebug.grabs === 0);
   await phone.getByRole('button', {name: 'Reset Droppie'}).click();
   const target = (await state(phone)).screen;
@@ -76,12 +96,13 @@ try {
   await phone.waitForFunction(() => window.dropletDebug.poolState.active, {}, {timeout: 20000});
   await phone.setViewportSize({width: 844, height: 390});
   await phone.waitForTimeout(200);
-  await phone.screenshot({path: '/tmp/droppie-pool-landscape.png'});
+  await phone.screenshot({path: `/tmp/droppie-pool-v2-${engine}-landscape.png`});
   assert((await state(phone)).finite, 'rotation and mobile water interaction remain finite');
   await phone.getByRole('button', {name: 'Toggle pool'}).click();
   assert.equal(await phone.getByRole('button', {name: 'Toggle pool'}).getAttribute('aria-pressed'), 'false');
+  await Promise.all(consoleJobs);
   assert.deepEqual(errors, [], 'no browser, shader or WebGPU errors');
-  console.log('Pool browser passed: desktop/mobile rendering, splash, grab/release, orbit, reset, toggle, sound and rotation.');
+  console.log(`Pool ${engine} browser passed: desktop/mobile rendering, water-tap waves, splash, grab/release, orbit, reset, toggle, sound and rotation.`);
 } finally {
   await browser.close();
 }

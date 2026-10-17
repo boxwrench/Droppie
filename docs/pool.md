@@ -1,42 +1,68 @@
-# Shallow pool — first addition
+# Pool — larger, deeper and reference-based
 
-The pool is a small ceramic dish on the existing tabletop. Droppie starts in its
-shallow water. Tap or press Space to hop and splash; drag and release as before.
-The wave button toggles the pool and returns to the dry playground. Reset clears
-water effects and restores Droppie while keeping the chosen pool setting.
+The pool has a 29 cm inner diameter and 1.5 cm water depth (Droppie is about
+6 cm tall). This replaces the first 15.2 cm dish and 0.7 cm water depth. The
+portrait and desktop cameras start far enough back to frame the larger basin;
+zoom still brings Droppie closer.
 
-`src/game/pool-physics.ts` owns the pool dimensions, gentle submerged drag and
-buoyancy, water-entry detection and six reusable ripple slots. It runs around the
-existing fixed-rate XPBD solver. Water forces only touch submerged nodes within
-the pool and do not wake a sleeping body. The shared facility contact code has an
-additive hollow-rim shape so the basin can be approached from either side and
-jumped over. The original floor, material constants and grab solver are unchanged.
+Tap empty water to stir it. Tap Droppie or press Space to hop and splash; drag
+and release as before. The wave button toggles the pool. Reset clears water and
+splash effects and restores Droppie while preserving the chosen pool setting.
+Dragging the floor still orbits; a drag or pinch must not also register a water
+poke.
 
-`src/graphics/pool.ts` builds the ceramic basin and a small tessellated water
-surface using the existing Three.js dependency and environment. Finite ripple
-packets deform the surface and its lighting normals. The basin uses the existing
-facility shadow pass. Water entries reuse the existing bounded splash particles
-and sound effects. No external assets or new dependencies are needed.
+## Actual reference reuse
 
-This is a shallow-water toy approximation. It does not simulate a fluid volume,
-merge Droppie into the water, pour water or model a deep swimming pool. The first
-step deliberately retains the current character simulation and controls.
+The first pool used six independently authored fading ripple packets. This
+revision replaces those with an adaptation of **ScottieFox's CAUSTIC//LITE** at
+`d87351bff19831aa9d11c0679605fad6797b133f`. See
+[THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) and the included MIT licence.
 
-Verify with `npm run test:pool`, the existing physics/input checks, typecheck,
-lint, build and `npm run test:pool:browser` (with the dev server on port 5180,
-or set `DROPPIE_URL`). Browser checks should include pool
-on/off, hop/re-entry, dragging, reset, sound, portrait and landscape. Software
-WebGPU screenshots do not establish performance on a phone's native GPU.
+- `src/water/pool-surface.ts`: the reference's actual two-height wave-equation
+  stencil, Gaussian impulses and old/new moving-hull displacement, converted to
+  metres and a circular reflecting boundary. An 80x80 CPU grid uploads height
+  and slope through a filterable half-float WebGPU texture. The solver advances
+  at 60 Hz, separately from the 240 Hz character solver.
+- `src/graphics/pool.ts`: a TSL adaptation of the reference's refracted light-ray
+  projection and derivative-based area-ratio caustics. Surface displacement,
+  normals and bottom refraction use the same height field. The water is shaded
+  from an analytically refracted tiled floor, with depth absorption and the
+  existing environment lighting, rather than a second nested screen-transmission
+  pass. The basin uses the existing facility shadow pass.
+- `src/game/pool-physics.ts`: submerged drag/buoyancy and the deformed character's
+  changing hull footprint drive the water. Entry and rebound can trigger bounded
+  splash particles and sound. Wave heights stay within the pool's freeboard;
+  waves reflect from the wall and damp to rest. Sleeping Droppie is not nudged.
+- `src/physics/facility-collision.ts`: the hollow lip resolves skin contacts from
+  both sides. A denser pool-specific skin sample catches the taller wall. Held
+  bodies step onto the lip; a body initially astride it is depenetrated with a
+  volume-preserving translation.
 
-Implementation validation: pool physics, original physics, multitouch,
-deformation, facility collision, performance and orientation checks passed.
-The orientation compiler on this machine is selected with
-`CLANG=/usr/bin/clang-18`. Typecheck, lint and production build passed. Desktop
-and mobile software-WebGPU checks passed without browser or GPU errors; their
-screenshots were reviewed for framing and basin geometry.
+Three.js Particle Fluids was evaluated directly. Its current implementation
+requires r184; Droppie uses r185. It is not installed or represented as the
+active solver. Droppie keeps the existing XPBD solver, floor and grab behavior.
+This is a height-field pool, not a 3D particle liquid: it does not pour, overturn
+or merge Droppie into the water.
 
-The regular Chrome session currently fails before scene construction with
-`Unable to create WebGPU adapter`. The existing published Droppie fails with the
-same error there, so this is a browser/adapter limitation shared by the baseline.
-The automated browser uses an isolated software-WebGPU configuration; normal
-interactive preview requires a browser with a working WebGPU adapter.
+## Preview and checks
+
+Run `npm run preview:pool`, then open http://localhost:5180/ in a WebGPU browser.
+This review server disables hot reload and uses its own dependency cache so
+Firefox checks are not interrupted by module reloads while files are edited.
+Reload manually after edits. Ordinary `npm run dev` is still available.
+
+- `npm run test:pool`: dry-physics equivalence, rest/sleep, repeated water entries,
+  bounded impulses, reset, rim contacts, dragging over the lip, propagated wave
+  response, wake generation and damping.
+- `npm run test:pool:browser`: Playwright Chromium, with software WebGPU.
+- `DROPPIE_BROWSER=firefox npm run test:pool:browser`: Playwright Firefox with
+  WebGPU enabled in its isolated test profile. Checks water-tap energy, landing
+  splashes, grab/release, orbit, reset, toggle, sound and responsive layouts.
+- The existing physics, multitouch, deformation, collision and performance
+  checks, plus typecheck, lint and build, cover integration regressions.
+
+Firefox successfully created a WebGPU adapter and rendered this revision in
+Playwright. The system Firefox is 156.0.1; the matching Playwright test browser
+is its separate bundled Firefox. These checks do not establish native GPU
+performance on a phone. The earlier regular Chrome adapter limitation remains
+separate from this pool revision.

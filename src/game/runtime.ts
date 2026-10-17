@@ -31,8 +31,8 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   scene.background=new THREE.Color('#e8d9c3');scene.fog=new THREE.Fog('#e8d9c3',2,12);
   const camera=new THREE.PerspectiveCamera(36,1,.001,40);
   // Start wide enough to see the shallow pool, including in portrait.
-  if(window.innerWidth<700)camera.position.set(.018,.23,.36);
-  else camera.position.set(.018,.145,.25);
+  if(window.innerWidth<700)camera.position.set(.025,.40,.67);
+  else camera.position.set(.025,.25,.48);
   stage('Reading the light');
   const environment=await loadEnvironment(renderer,scene);
   stage('Shaping Droppie');
@@ -47,7 +47,9 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   const table=await makeTable(optics,environment,facilityShadows,puddle);scene.add(table.mesh);
   const composite=createComposite(renderer,scene,camera);
   const rig=new Locomotion(body);
+  let poolSplashCount=0;
   poolPhysics.onSplash=(origin,speed,velocity)=>{
+    poolSplashCount++;
     const power=Math.min(1,speed/.45);
     splash.burst(origin,.18+power*.17,6+Math.round(power*6),velocity,POOL.waterLevel);
     sound.splash(power);sound.blup(power*.6);
@@ -69,8 +71,15 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   };
   const physicsClock=new FixedStepper(PHYS.step);
   let lastTime=0,disposed=false;
-  const reset=()=>{sound.stopFacilities();sound.reset();input.clear();rig.reset();body.reset();input.recenter();baby.resetFace();physicsClock.reset();splash.clear();puddle.hide();poolPhysics.reset();pool.update();};
-  const input=new Input(camera,renderer.domElement,body,baby.mesh,rig,sound,reset);
+  const reset=()=>{sound.stopFacilities();sound.reset();input.clear();rig.reset();body.reset();input.recenter();baby.resetFace();physicsClock.reset();splash.clear();puddle.hide();poolPhysics.reset();poolSplashCount=0;pool.update(renderer);};
+  const input=new Input(camera,renderer.domElement,body,baby.mesh,rig,sound,reset,.95);
+  const waterPlane=new THREE.Plane(new THREE.Vector3(0,1,0),-POOL.waterLevel),waterPoint=new THREE.Vector3();
+  input.onBackgroundTap=ray=>{
+    if(ray.intersectPlane(waterPlane,waterPoint)&&poolPhysics.contains(waterPoint.x,waterPoint.z)) {
+      poolPhysics.disturb(waterPoint.x,waterPoint.z,1);
+      void sound.unlock().then(()=>sound.blup(.2)).catch(()=>{});
+    }
+  };
   if(import.meta.env.DEV)Object.defineProperty(window,'dropletDebug',{configurable:true,get:()=>({
     center:body.center.toArray(),sleeping:body.sleeping,grabs:body.grabs.length,volume:body.volumeRatio(),
     camera:camera.position.toArray(),finite:body.isFinite(),quality:{...quality},
@@ -79,7 +88,9 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
     puddleState:{visible:puddle.visible,radius:puddle.radius.value,strength:puddle.strength.value},
     hidePuddle:()=>puddle.hide(),
     poolState:{enabled:poolPhysics.enabled,submerged:poolPhysics.submerged,active:poolPhysics.active,
-      ripples:poolPhysics.ripples.filter(ripple=>ripple.age<POOL.rippleLifetime).length},
+      energy:poolPhysics.surface.energy,maxHeight:poolPhysics.surface.maxHeight,revision:poolPhysics.surface.revision,
+      radius:POOL.radius,depth:POOL.waterLevel,splashes:poolSplashCount},
+    waterScreen:((p:THREE.Vector3)=>{const v=p.project(camera);return [(v.x+1)*renderer.domElement.clientWidth/2,(1-v.y)*renderer.domElement.clientHeight/2];})(new THREE.Vector3(.08,POOL.waterLevel,.035)),
     screen:((p:THREE.Vector3)=>{const v=p.clone().project(camera);return [(v.x+1)*renderer.domElement.clientWidth/2,(1-v.y)*renderer.domElement.clientHeight/2];})(body.center),
     splash:(count?:number,speed?:number)=>splash.burst(body.center,speed??.55,count??24,rig.velocity),
     soundHop:()=>sound.hop(),soundSplash:()=>sound.splash(.8),
@@ -89,11 +100,11 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   const transport=new OpticalTransport(optics,body,camera,environment.incoming,fail);
   const listeners=new AbortController();
   document.querySelector('#pool')!.addEventListener('click',event=>{
-    pool.setEnabled(!poolPhysics.enabled);pool.update();body.wake();
+    pool.setEnabled(!poolPhysics.enabled);pool.update(renderer);body.wake();
     splash.clear();puddle.hide();
     const button=event.currentTarget as HTMLButtonElement;
     button.setAttribute('aria-pressed',String(poolPhysics.enabled));
-    document.querySelector('.play-hints')!.textContent=poolPhysics.enabled?'tap to splash · pull to stretch · let go':'tap to boop · pull to stretch · let go';
+    document.querySelector('.play-hints')!.textContent=poolPhysics.enabled?'tap water to ripple · boop Droppie · pull to stretch':'tap to boop · pull to stretch · let go';
     if((event as MouseEvent).detail>0)button.blur();
     void sound.unlock().catch(()=>{});
   },{signal:listeners.signal});
@@ -115,7 +126,7 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   stage('Settling in');
   // Let contact establish itself before displaying the first frame.
   for(let i=0;i<80;i++){rig.step(PHYS.step);poolPhysics.step(PHYS.step);body.step(PHYS.step);poolPhysics.afterStep();}
-  poolPhysics.reset();pool.update();
+  poolPhysics.reset();pool.update(renderer);
   body.updateSurface();baby.update();input.update(1);
   facilityShadows.update(renderer);
   optics.update(renderer,body,true);
@@ -149,7 +160,7 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
         body.updateSurface();
       }
       baby.update(dt);
-      pool.update();facilityShadows.update(renderer);
+      pool.update(renderer);facilityShadows.update(renderer);
       if(observeFrame(dt))resize();
       transport.rate=quality.opticalHz;
       splash.update(dt);

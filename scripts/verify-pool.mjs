@@ -4,6 +4,7 @@ import { SoftBody } from '../src/physics/soft-body.js';
 import { PHYS } from '../src/physics/constants.js';
 import { Locomotion } from '../src/game/locomotion.ts';
 import { PoolPhysics, POOL } from '../src/game/pool-physics.ts';
+import { PoolSurface } from '../src/water/pool-surface.ts';
 import { loadModel } from './load-model.mjs';
 
 function setup(offset = 0) {
@@ -45,16 +46,15 @@ function setup(offset = 0) {
     if (trial) step(960);
     rig.jump(); step(240);
   }
-  assert(splashes >= 3 && splashes <= 4, 'each hop and re-entry produces one bounded splash');
+  assert(splashes >= 3 && splashes <= 6, 'each hop splashes on entry, with at most one smaller rebound splash');
   assert(pool.active, 're-entry produces visible ripples');
   assert(body.volumeRatio() > .8 && body.volumeRatio() < 1.2, 'water forces retain volume');
-  step(1440);
+  step(4800);
   assert(body.sleeping && !pool.active, 'body sleeps and ripples finish');
   const asleep = body.x.slice(); step(120);
   assert.deepEqual(body.x, asleep, 'water does not keep nudging a sleeping body');
   for (let i = 0; i < 30; i++) pool.disturb(0, 0, 2);
-  assert.equal(pool.ripples.length, POOL.rippleCount, 'ripple storage remains bounded');
-  assert(pool.ripples.every(ripple => ripple.strength <= 1));
+  assert.equal(pool.surface.queuedImpulses, 8, 'pending wave impulses remain bounded');
   pool.reset();
   assert(!pool.active, 'reset clears all ripples');
   const before = body.x.slice();
@@ -84,7 +84,8 @@ for (const offset of [POOL.radius - .009, POOL.outerRadius + .009, (POOL.radius 
 // Drag the real tip binding from the tabletop over the rim, then release into
 // the water. This exercises the existing grab solver together with new contacts.
 {
-  const {body, pool, step} = setup(.14);
+  const approach = POOL.outerRadius + .07;
+  const {body, pool, step} = setup(approach);
   step(480);
   const positions = body.surface.positions;
   let tip = 0;
@@ -93,13 +94,34 @@ for (const offset of [POOL.radius - .009, POOL.outerRadius + .009, (POOL.radius 
   for (const [id, weight] of weights) point.addScaledVector(new Vector3().fromArray(body.x, id * 3), weight);
   body.grab = {weights, point: point.clone(), target: point.clone(), lambda: new Float64Array(3)};
   for (let i = 0; i < 360; i++) {
-    body.grab.target.set(point.x - .14 * Math.min(1, i / 240), point.y + .025, point.z);
+    body.grab.target.set(point.x - approach * Math.min(1, i / 240), point.y + .05, point.z);
     step(1);
   }
   body.grab = null; body.wake(); step(1440);
   assert(Math.hypot(body.center.x, body.center.z) < POOL.radius - .015, 'dragging can enter the pool over its rim');
   assert(pool.submerged > 0, 'released character reaches the water');
   assert(body.volumeRatio() > .8 && body.volumeRatio() < 1.2, 'rim crossing and release retain volume');
+}
+
+// This is now a propagated wave field, not a timed collection of visual rings.
+{
+  const surface = new PoolSurface(POOL.radius, POOL.waterLevel);
+  surface.step(1 / 60);
+  assert.equal(surface.energy, 0, 'undisturbed surface stays flat');
+  surface.disturb(.045, 0, 1);
+  for (let i = 0; i < 30; i++) surface.step(1 / 60);
+  assert(surface.maxHeight > .0002, 'tap produces millimetre-scale moving waves');
+  assert(surface.maxHeight <= surface.limit + 1e-8, 'wave height stays inside pool freeboard');
+  assert(surface.pixels.every(Number.isFinite), 'height and normal texture remains finite');
+  const n = surface.size, center = Math.floor(n / 2);
+  assert(Math.abs(surface.pixels[(center * n + center) * 4]) > .00001, 'disturbance propagates away from its tap location');
+  for (let i = 0; i < 1800; i++) surface.step(1 / 60);
+  assert(!surface.active, 'reflected waves eventually damp to rest');
+  surface.setHull(-.02, 0, .03, .008); surface.reset();
+  surface.setHull(.02, 0, .03, .008); surface.step(1 / 60);
+  assert(surface.active && surface.maxHeight > .0001, 'moving hull generates a wake without a tap or landing');
+  surface.reset();
+  assert.equal(surface.energy, 0, 'reset clears the simulation texture');
 }
 
 console.log('Pool physics passed: dry equivalence, sleep, repeated entries, reset, bounded ripples, rim contacts and drag into water.');
