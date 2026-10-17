@@ -45,8 +45,33 @@ revision replaces those with an adaptation of **ScottieFox's CAUSTIC//LITE** at
 Three.js Particle Fluids was evaluated directly. Its current implementation
 requires r184; Droppie uses r185. It is not installed or represented as the
 active solver. Droppie keeps the existing XPBD solver, floor and grab behavior.
-This is a height-field pool, not a 3D particle liquid: it does not pour, overturn
+This is a height-field pool, not a 3D particle liquid: the pool does not overturn
 or merge Droppie into the water.
+
+## Bucket on a stool
+
+A small enamel bucket stands on a wooden stool just inside the pool edge, where
+the existing drag controls can reach it. Bumping a leg or the seat with Droppie
+tips the bucket. Tapping the bucket or any wooden part does the same on a phone.
+
+The bucket teeters, progressively tips and empties over 2.6 seconds, waits empty,
+then returns and refills. The complete cycle takes about six real-time seconds,
+including when rendering is slow. Another
+tap or continuing contact cannot queue extra pours. Reset cancels it immediately;
+turning the pool off hides the whole prop and cancels the stream and its effects.
+
+- `src/game/pour-bucket.ts` owns the cycle, shared stool contact volumes, a
+  ballistic stream trajectory and bounded impacts in the existing wave field.
+  The stool uses the existing sampled soft-body collision response. Pouring
+  affects the pool surface and does not add permanent water or move a sleeping
+  Droppie. This is an authored secondary effect rather than a new fluid solver.
+- `src/graphics/pour-bucket.ts` builds the stool, hollow enamel pail and wire
+  handle. Its horizontal water surface is clipped to the tilted bucket interior.
+  One reusable stream mesh and ten instanced beads show the pour; the existing
+  bounded splash particles supply spray at the landing point. Meshes and
+  materials are created once, with no per-frame geometry allocation.
+- The prop shares the facility shadow pass and existing sound/mute behavior.
+  Its idle state lets the renderer sleep normally.
 
 ## Preview and checks
 
@@ -57,13 +82,16 @@ Reload manually after edits. Ordinary `npm run dev` is still available.
 
 - `npm run test:pool`: dry-physics equivalence, rest/sleep, repeated water entries,
   bounded impulses, reset, rim contacts, dragging over the lip, propagated wave
-  response, wake generation and damping.
+  response, wake generation and damping, bucket recovery and a real soft-body
+  bump against the stool.
 - `npm run test:pool:browser`: Playwright Chromium, with software WebGPU.
 - `DROPPIE_BROWSER=firefox npm run test:pool:browser`: Playwright Firefox with
   WebGPU enabled in its isolated test profile. Checks water-tap energy, landing
   splashes, grab/release, orbit, reset, toggle, sound and responsive layouts.
   A repeated portrait drag also samples floor brightness to catch the dark-flash
-  regression while allowing normal wave shading.
+  regression while allowing normal wave shading. Bucket checks exercise mouse
+  and phone taps, dragging Droppie into the stool, automatic recovery, reset
+  during a pour, and cancelling a pour by switching the pool off.
 - The existing physics, multitouch, deformation, collision and performance
   checks, plus typecheck, lint and build, cover integration regressions.
 

@@ -61,9 +61,35 @@ try {
   assert(splashed.finite && splashed.volume > .8 && splashed.volume < 1.2, 'hop and water re-entry preserve the body');
   await page.screenshot({path: `/tmp/droppie-pool-v2-${engine}-splash.png`});
 
+  await page.getByRole('button', {name: 'Reset Droppie'}).click();
+  await page.mouse.click(...(await state(page)).bucketScreen);
+  await page.waitForFunction(() => window.dropletDebug.bucketState.flow > .5, {}, {timeout: 15000});
+  await page.waitForFunction(() => window.dropletDebug.bucketState.impacts > 1, {}, {timeout: 10000});
+  assert((await state(page)).poolState.energy > .00001, 'pouring stream makes real pool waves');
+  await page.screenshot({path: `/tmp/droppie-bucket-${engine}-pouring.png`});
+  await page.waitForFunction(() => window.dropletDebug.bucketState.phase === 'ready', {}, {timeout: 20000});
+  assert.equal((await state(page)).bucketState.fill, 1, 'bucket refills automatically');
+  await page.getByRole('button', {name: 'Reset Droppie'}).click();
+  const bumpStart = (await state(page)).screen, bumpTarget = (await state(page)).stoolScreen;
+  await page.mouse.move(...bumpStart); await page.mouse.down();
+  for (let i = 1; i <= 90 && !(await state(page)).bucketState.knocks; i++) {
+    const progress = Math.min(1, i / 60);
+    await page.mouse.move(bumpStart[0] + (bumpTarget[0] - bumpStart[0]) * progress,
+      bumpStart[1] + (bumpTarget[1] - bumpStart[1]) * progress);
+    await page.waitForTimeout(40);
+  }
+  await page.mouse.up();
+  assert.equal((await state(page)).bucketState.knocks, 1, 'dragging Droppie into the stool tips the bucket');
+  await page.getByRole('button', {name: 'Reset Droppie'}).click();
+  assert.equal((await state(page)).bucketState.phase, 'ready', 'reset cancels a tipped bucket');
+  assert.equal((await state(page)).bucketState.impacts, 0, 'reset clears pending pour effects');
+  await page.mouse.click(...(await state(page)).bucketScreen);
+  await page.waitForFunction(() => window.dropletDebug.bucketState.flow > .5, {}, {timeout: 15000});
+
   await page.getByRole('button', {name: 'Toggle pool'}).click();
   let snapshot = await state(page);
   assert(!snapshot.poolState.enabled && !snapshot.poolState.active, 'toggle restores dry playground');
+  assert(!snapshot.bucketState.enabled && snapshot.bucketState.phase === 'ready' && snapshot.bucketState.flow === 0, 'pool toggle hides and cancels the pour');
   await page.getByRole('button', {name: 'Reset Droppie'}).click();
   assert(!(await state(page)).poolState.enabled, 'reset keeps chosen pool setting');
   const [x, y] = (await state(page)).screen;
@@ -108,6 +134,11 @@ try {
   const brightnessRange = Math.max(...brightness) - Math.min(...brightness);
   assert(brightnessRange < brightness[0] * .16, `pool stays lit during dragging (brightness range ${brightnessRange.toFixed(1)})`);
   await phone.getByRole('button', {name: 'Reset Droppie'}).click();
+  await phone.touchscreen.tap(...(await state(phone)).bucketScreen);
+  await phone.waitForFunction(() => window.dropletDebug.bucketState.flow > .5, {}, {timeout: 15000});
+  await phone.screenshot({path: `/tmp/droppie-bucket-${engine}-phone.png`});
+  assert((await state(phone)).bucketState.knocks === 1, 'phone tap tips bucket');
+  await phone.getByRole('button', {name: 'Reset Droppie'}).click();
   const point = (await state(phone)).screen;
   const cdp = useFirefox ? null : await mobile.newCDPSession(phone);
   if (cdp) {
@@ -133,7 +164,7 @@ try {
   assert.equal(await phone.getByRole('button', {name: 'Toggle pool'}).getAttribute('aria-pressed'), 'false');
   await Promise.all(consoleJobs);
   assert.deepEqual(errors, [], 'no browser, shader or WebGPU errors');
-  console.log(`Pool ${engine} browser passed: desktop/mobile rendering, water-tap waves, splash, grab/release, orbit, reset, toggle, sound and rotation.`);
+  console.log(`Pool ${engine} browser passed: stable drag lighting, waves, splash, bucket tap/bump/pour/recovery, cancellation, grab/release, orbit, sound and phone rotation.`);
 } finally {
   await browser.close();
 }

@@ -3,7 +3,7 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML=`
 <main id="viewport" aria-label="Droppie physics playground"></main>
 <header class="masthead"><span class="eyebrow">a little moment of play</span><h1>droppie<span>.</span></h1></header>
 <nav class="actions" aria-label="Playground controls"><button id="pool" class="icon-button" aria-label="Toggle pool" aria-pressed="true" title="Pool on / off">≋</button><button id="sound" class="icon-button" aria-label="Mute sound" aria-pressed="false" title="Sound">♫</button><button id="reset" class="icon-button" aria-label="Reset Droppie" title="Reset · R">↺</button></nav>
-<footer class="play-hints">tap water to ripple · boop Droppie · pull to stretch</footer>
+<footer class="play-hints">tap water · bump or tap the stool to pour · pull to stretch</footer>
 <section id="loading" role="status" aria-live="polite"><div class="loading-card"><h2>A little drop of joy.</h2><p id="load-message">Warming up the light…</p><pre id="fatal" hidden></pre><button id="retry" hidden>Try again</button></div></section>`;
 let failed=false,game:{stop:()=>void}|undefined;
 function fail(reason:unknown) {

@@ -12,7 +12,9 @@ it. Drag empty floor to orbit, pinch or scroll to zoom, press Space to hop, R
 to reset, and Escape to release. Sound unlocks after interaction; the buttons
 in the top-right toggle the shallow pool, mute sound and reset the toy. Droppie
 starts in the pool: hop to splash, drag to make wakes, or tap the empty water to
-stir it. See [pool notes](docs/pool.md) and [reference credits](THIRD_PARTY_NOTICES.md).
+stir it. Bump or tap the little stool to tip its bucket: it pours into the pool,
+then returns upright and refills after a few seconds. See [pool notes](docs/pool.md)
+and [reference credits](THIRD_PARTY_NOTICES.md).
 
 The demo needs a WebGPU-capable recent browser and a secure context (HTTPS or
 localhost). The first visit downloads roughly 12 MB of textures and an HDR

@@ -19,6 +19,8 @@ import { Puddle } from '../water/puddle.ts';
 import { quality, observeFrame } from '../graphics/quality.ts';
 import { PoolPhysics, POOL } from './pool-physics.ts';
 import { Pool } from '../graphics/pool.ts';
+import { PourBucket, BUCKET } from './pour-bucket.ts';
+import { BucketVisual } from '../graphics/pour-bucket.ts';
 
 export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   stage('Starting WebGPU');
@@ -42,6 +44,8 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   const facilityShadows=new FacilityShadows(environment.incoming);
   const poolPhysics=new PoolPhysics(body);
   const pool=new Pool(poolPhysics,facilityShadows,optics);scene.add(pool.group);
+  const bucket=new PourBucket(body,poolPhysics);
+  const bucketVisual=new BucketVisual(bucket,facilityShadows);scene.add(bucketVisual.group);
   const splash=new SplashParticles();scene.add(splash.mesh);
   const puddle=new Puddle();
   const table=await makeTable(optics,environment,facilityShadows,puddle);scene.add(table.mesh);
@@ -54,6 +58,11 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
     const power=Math.min(1,speed/.45);
     splash.burst(origin,.18+power*.17,6+Math.round(power*6),velocity,POOL.waterLevel);
     sound.splash(power);sound.blup(power*.6);
+  };
+  bucket.onKnock=()=>sound.contact(.15,false);
+  bucket.onImpact=(origin,strength)=>{
+    splash.burst(origin,.10+strength*.025,2,undefined,POOL.waterLevel);
+    if(bucket.impacts%5===1)sound.splash(.09);
   };
   rig.onContact=(speed,foot)=>{
     // Water entry owns its own effects; don't paint a wood puddle under the dish.
@@ -72,10 +81,15 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   };
   const physicsClock=new FixedStepper(PHYS.step);
   let lastTime=0,disposed=false;
-  const reset=()=>{sound.stopFacilities();sound.reset();input.clear();rig.reset();body.reset();input.recenter();baby.resetFace();physicsClock.reset();splash.clear();puddle.hide();poolPhysics.reset();poolSplashCount=0;pool.update(renderer);};
+  const reset=()=>{sound.stopFacilities();sound.reset();input.clear();rig.reset();body.reset();input.recenter();baby.resetFace();physicsClock.reset();splash.clear();puddle.hide();poolPhysics.reset();bucket.reset();bucketVisual.update();poolSplashCount=0;pool.update(renderer);};
   const input=new Input(camera,renderer.domElement,body,baby.mesh,rig,sound,reset,.95);
   const waterPlane=new THREE.Plane(new THREE.Vector3(0,1,0),-POOL.waterLevel),waterPoint=new THREE.Vector3();
+  const propRay=new THREE.Raycaster();
   input.onBackgroundTap=ray=>{
+    if(bucket.enabled) {
+      bucketVisual.group.updateWorldMatrix(true,true);propRay.ray.copy(ray);
+      if(propRay.intersectObjects(bucketVisual.pickables).length&&bucket.knock())return;
+    }
     if(ray.intersectPlane(waterPlane,waterPoint)&&poolPhysics.contains(waterPoint.x,waterPoint.z)) {
       poolPhysics.disturb(waterPoint.x,waterPoint.z,1);
       void sound.unlock().then(()=>sound.blup(.2)).catch(()=>{});
@@ -91,6 +105,9 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
     poolState:{enabled:poolPhysics.enabled,submerged:poolPhysics.submerged,active:poolPhysics.active,
       energy:poolPhysics.surface.energy,maxHeight:poolPhysics.surface.maxHeight,revision:poolPhysics.surface.revision,
       radius:POOL.radius,depth:POOL.waterLevel,splashes:poolSplashCount},
+    bucketState:{enabled:bucket.enabled,phase:bucket.phase,angle:bucket.angle,fill:bucket.fill,flow:bucket.flow,knocks:bucket.knocks,impacts:bucket.impacts},
+    bucketScreen:((p:THREE.Vector3)=>{const v=p.project(camera);return [(v.x+1)*renderer.domElement.clientWidth/2,(1-v.y)*renderer.domElement.clientHeight/2];})(new THREE.Vector3(BUCKET.x,BUCKET.baseY+BUCKET.height*.5,BUCKET.z)),
+    stoolScreen:((p:THREE.Vector3)=>{const v=p.project(camera);return [(v.x+1)*renderer.domElement.clientWidth/2,(1-v.y)*renderer.domElement.clientHeight/2];})(new THREE.Vector3(BUCKET.x,BUCKET.seatHeight*.5,BUCKET.z)),
     waterScreen:((p:THREE.Vector3)=>{const v=p.project(camera);return [(v.x+1)*renderer.domElement.clientWidth/2,(1-v.y)*renderer.domElement.clientHeight/2];})(new THREE.Vector3(.08,POOL.waterLevel,.035)),
     screen:((p:THREE.Vector3)=>{const v=p.clone().project(camera);return [(v.x+1)*renderer.domElement.clientWidth/2,(1-v.y)*renderer.domElement.clientHeight/2];})(body.center),
     splash:(count?:number,speed?:number)=>splash.burst(body.center,speed??.55,count??24,rig.velocity),
@@ -102,10 +119,11 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   const listeners=new AbortController();
   document.querySelector('#pool')!.addEventListener('click',event=>{
     pool.setEnabled(!poolPhysics.enabled);pool.update(renderer);body.wake();
+    bucket.reset();bucketVisual.update();
     splash.clear();puddle.hide();
     const button=event.currentTarget as HTMLButtonElement;
     button.setAttribute('aria-pressed',String(poolPhysics.enabled));
-    document.querySelector('.play-hints')!.textContent=poolPhysics.enabled?'tap water to ripple · boop Droppie · pull to stretch':'tap to boop · pull to stretch · let go';
+    document.querySelector('.play-hints')!.textContent=poolPhysics.enabled?'tap water · bump or tap the stool to pour · pull to stretch':'tap to boop · pull to stretch · let go';
     if((event as MouseEvent).detail>0)button.blur();
     void sound.unlock().catch(()=>{});
   },{signal:listeners.signal});
@@ -133,7 +151,9 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   optics.update(renderer,body,true);
   await transport.update();
   stage('Compiling the material');
+  bucketVisual.prepareCompile();
   await renderer.compileAsync(scene,camera);
+  bucketVisual.update();
   stage('Drawing the first frame');
   composite.render();
   // Fence first-frame GPU work so validation/OOM cannot masquerade as a successful boot.
@@ -151,9 +171,10 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
       const dt=Math.min(.05,effectDt);lastTime=time;
       if(document.hidden){physicsClock.reset();return;}
       const poolWasActive=poolPhysics.active;
+      const bucketWasActive=bucket.active;
       const steps=physicsClock.advance(dt,()=>{
         input.step(PHYS.step);rig.step(PHYS.step);
-        poolPhysics.step(PHYS.step);body.step(PHYS.step);poolPhysics.afterStep();
+        poolPhysics.step(PHYS.step);body.step(PHYS.step);poolPhysics.afterStep();bucket.afterStep(PHYS.step);
         input.afterPhysicsStep();rig.afterStep();
       });
       if(steps&&body.surfaceDirty) {
@@ -161,6 +182,8 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
         body.updateSurface();
       }
       baby.update(dt);
+      bucket.step(effectDt);
+      bucketVisual.update();
       pool.update(renderer);facilityShadows.update(renderer);
       if(observeFrame(dt))resize();
       transport.rate=quality.opticalHz;
@@ -175,7 +198,7 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
       const faceVersion=baby.group.children.reduce((sum,child)=>sum+(((child as THREE.Mesh).geometry?.attributes.position as THREE.BufferAttribute|undefined)?.version??0),0);
       const thicknessVersion=body.surface.geometry.attributes.opticalThickness.version;
       const size=renderer.domElement.width+','+renderer.domElement.height;
-      if(!body.sleeping||splash.active||puddleChanged||poolWasActive||poolPhysics.active||renderedSurface!==body.surfaceRevision||renderedFace!==faceVersion||
+      if(!body.sleeping||splash.active||puddleChanged||poolWasActive||poolPhysics.active||bucketWasActive||bucket.active||renderedSurface!==body.surfaceRevision||renderedFace!==faceVersion||
         renderedThickness!==thicknessVersion||renderedDpr!==renderer.getPixelRatio()||renderedSize!==size||
         renderedCamera.distanceToSquared(camera.position)>1e-12||renderedRotation.angleTo(camera.quaternion)>1e-6) {
         composite.render();renderedSurface=body.surfaceRevision;renderedFace=faceVersion;
@@ -188,7 +211,7 @@ export async function startGame(stage:(s:string)=>void,fail:(e:unknown)=>void) {
   const dispose=()=>{
     if(disposed)return;disposed=true;
     void renderer.setAnimationLoop(null);listeners.abort();input.dispose();sound.dispose();transport.dispose();resizeObserver.disconnect();cancelAnimationFrame(resizeFrame);
-    facilityShadows.dispose();pool.dispose();composite.dispose();baby.dispose();table.dispose();splash.dispose();environment.dispose();optics.dispose();renderer.dispose();
+    facilityShadows.dispose();bucketVisual.dispose();pool.dispose();composite.dispose();baby.dispose();table.dispose();splash.dispose();environment.dispose();optics.dispose();renderer.dispose();
   };
   window.addEventListener('pagehide',event=>{if(!event.persisted)dispose();});
   if(import.meta.hot)import.meta.hot.dispose(dispose);
